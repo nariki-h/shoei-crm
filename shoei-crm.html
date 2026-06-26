@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>翔栄リアルエステート CRM</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --primary:#1a3a5c;--accent:#2d7dd2;--accent-light:#e8f2fc;
+  --success:#2d9e6b;--border:#e2e8f0;--text:#1a202c;
+  --text-sub:#64748b;--text-muted:#94a3b8;--bg:#f7f9fc;--surface:#ffffff;
+}
+body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;height:100vh;overflow:hidden;}
+#login-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:var(--primary);}
+.login-card{background:var(--surface);border-radius:16px;padding:48px 40px;width:360px;text-align:center;}
+.login-logo{font-size:22px;font-weight:700;color:var(--primary);margin-bottom:8px;}
+.login-sub{font-size:13px;color:var(--text-sub);margin-bottom:32px;}
+.login-btn{width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;}
+.login-btn:hover{background:#1a6dbf;}
+#app{display:none;height:100vh;flex-direction:column;}
+.header{height:56px;background:var(--primary);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;}
+.header-logo{color:#fff;font-size:15px;font-weight:700;}
+.header-logo span{color:#7eb8f0;font-weight:400;}
+.header-spacer{flex:1;}
+.header-user{display:flex;align-items:center;gap:8px;color:#cbd5e1;font-size:12px;}
+.header-avatar{width:28px;height:28px;border-radius:50%;background:#2d7dd2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;}
+.header-btn{padding:6px 12px;background:rgba(255,255,255,.1);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;}
+.body{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
+.sidebar-search{padding:12px;}
+.sidebar-search input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--bg);outline:none;}
+.sidebar-filters{padding:0 12px 8px;display:flex;gap:6px;}
+.sidebar-filters select{flex:1;font-size:11px;padding:5px 4px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);outline:none;}
+.sidebar-list{flex:1;overflow-y:auto;}
+.sidebar-count{padding:6px 12px;font-size:11px;color:var(--text-muted);}
+.cust-item{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;}
+.cust-item:hover{background:var(--bg);}
+.cust-item.active{background:var(--accent-light);border-left:3px solid var(--accent);}
+.cust-row1{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;}
+.cust-name{font-size:13px;font-weight:600;}
+.rank-pill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;}
+.rs{background:#fef2ee;color:#c0392b;}.ra{background:#fef9ee;color:#9a6700;}.rb{background:#eef6ff;color:#1a5fa8;}.rc{background:#eefaf4;color:#166534;}.rd{background:#f5f5f5;color:#6b7280;}
+.cust-row2{display:flex;align-items:center;gap:6px;}
+.phase-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+.cust-phase{font-size:11px;color:var(--text-sub);}
+.sidebar-add{padding:10px 12px;border-top:1px solid var(--border);}
+.add-btn{width:100%;padding:8px;background:var(--accent-light);color:var(--accent);border:1px solid var(--accent);border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;}
+.detail{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);}
+.detail-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);gap:8px;}
+.det-head{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px;flex-shrink:0;}
+.det-hero{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+.det-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent-light);color:var(--accent);font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.det-name{font-size:16px;font-weight:700;}
+.det-kana{font-size:11px;color:var(--text-muted);margin-top:1px;}
+.det-actions{margin-left:auto;}
+.act-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-sub);font-size:12px;cursor:pointer;}
+.act-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+.phase-row{display:flex;align-items:center;gap:10px;}
+.phase-label-sm{font-size:11px;color:var(--text-muted);}
+.phase-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:99px;border:1px solid var(--accent);background:var(--accent-light);color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;}
+.det-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);overflow-x:auto;flex-shrink:0;}
+.tab-btn{padding:10px 16px;font-size:12px;color:var(--text-muted);border:none;background:transparent;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;font-weight:500;}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tab-add{padding:10px 12px;font-size:16px;color:var(--text-muted);border:none;background:transparent;cursor:pointer;}
+.det-body{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;}
+.sec-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.sec-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;}
+.field-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+.field-grid.three{grid-template-columns:repeat(3,1fr);}
+.field-item{display:flex;flex-direction:column;gap:3px;}
+.field-item.full{grid-column:1/-1;}
+.fl{font-size:11px;color:var(--text-muted);}
+.fv input,.fv select,.fv textarea{font-size:13px;border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--bg);color:var(--text);outline:none;width:100%;font-family:inherit;}
+.fv textarea{resize:none;line-height:1.6;}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:flex-end;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surface);border-radius:16px 16px 0 0;width:100%;max-width:480px;padding:20px 16px 24px;}
+.modal-title{font-size:14px;font-weight:700;margin-bottom:14px;}
+.phase-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}
+.phase-opt{padding:10px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;text-align:center;font-weight:500;background:var(--bg);}
+.phase-opt.selected{border-color:var(--accent);background:var(--accent);color:#fff;}
+.modal-cancel{width:100%;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text-sub);font-size:13px;cursor:pointer;}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--success);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;}
+.toast.show{opacity:1;}
+.loading{position:fixed;inset:0;background:rgba(255,255,255,.8);z-index:300;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-size:13px;color:var(--text-sub);}
+.loading.show{display:flex;}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">翔栄リアルエステート</div>
+    <div class="login-sub">顧客管理システム</div>
+    <button class="login-btn" id="login-btn">
+      <svg width="20" height="20" viewBox="0 0 20 20"><rect width="9.5" height="9.5" fill="#f25022"/><rect x="10.5" width="9.5" height="9.5" fill="#7fba00"/><rect y="10.5" width="9.5" height="9.5" fill="#00a4ef"/><rect x="10.5" y="10.5" width="9.5" height="9.5" fill="#ffb900"/></svg>
+      Microsoftアカウントでログイン
+    </button>
+  </div>
+</div>
+
+<div id="app">
+  <div class="header">
+    <div class="header-logo">翔栄 <span>リアルエステート CRM</span></div>
+    <div class="header-spacer"></div>
+    <div class="header-user">
+      <div class="header-avatar" id="user-initials">--</div>
+      <span id="user-name">--</span>
+      <button class="header-btn" id="logout-btn">ログアウト</button>
+    </div>
+  </div>
+  <div class="body">
+    <div class="sidebar">
+      <div class="sidebar-search">
+        <input type="text" placeholder="氏名で検索" id="search-input"/>
+      </div>
+      <div class="sidebar-filters">
+        <select id="filter-phase">
+          <option value="">全フェーズ</option>
+          <option>問合せ</option><option>連絡済</option><option>案内</option>
+          <option>物件待ち</option><option>来社</option><option>申込</option>
+          <option>契約済</option><option>融資承認</option><option>決済済</option><option>終了</option>
+        </select>
+        <select id="filter-rank">
+          <option value="">全ランク</option>
+          <option>S</option><option>A</option><option>B</option><option>C</option><option>D</option>
+        </select>
+      </div>
+      <div class="sidebar-count" id="list-count">--</div>
+      <div class="sidebar-list" id="customer-list"></div>
+      <div class="sidebar-add">
+        <button class="add-btn" id="new-btn">＋ 新規顧客を追加</button>
+      </div>
+    </div>
+    <div class="detail" id="detail">
+      <div class="detail-empty">
+        <div style="font-size:40px;opacity:.3;">🏠</div>
+        <div>顧客を選択してください</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="phase-modal">
+  <div class="modal">
+    <div class="modal-title">フェーズを変更</div>
+    <div class="phase-grid" id="phase-grid"></div>
+    <button class="modal-cancel" id="modal-cancel">キャンセル</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="loading" id="loading"><div class="spinner"></div><div id="loading-text">読み込み中...</div></div>
+
+<script>
+const PHASES=['問合せ','連絡済','案内','物件待ち','来社','申込','契約済','融資承認','決済済','終了'];
+const RANKS=['S','A','B','C','D'];
+const CLIENT_ID='ebb78259-3e33-42c0-a391-25bedb2ca478';
+const TENANT_ID='c8bff07e-b699-4853-8c26-19be4a8759be';
+const SITE_URL='https://shoeih.sharepoint.com/sites/Shoei-RealEstate';
+const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All','User.Read'];
+
+let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0;
+
+function loadMSAL(){
+  return new Promise((resolve,reject)=>{
+    if(window.msal){resolve();return;}
+    const s=document.createElement('script');
+    s.src='msal-browser.min.js';
+    s.onload=resolve;
+    s.onerror=reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function initMSAL(){
+  await loadMSAL();
+  msalApp=new msal.PublicClientApplication({
+    auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:window.location.href.split('?')[0].split('#')[0]},
+    cache:{cacheLocation:'sessionStorage'}
+  });
+  await msalApp.handleRedirectPromise();
+  const accounts=msalApp.getAllAccounts();
+  if(accounts.length>0){currentUser=accounts[0];onSignedIn();}
+}
+
+async function signIn(){
+  try{
+    const r=await msalApp.loginPopup({scopes:SCOPES});
+    currentUser=r.account;
+    onSignedIn();
+  }catch(e){alert('ログインエラー: '+e.message);}
+}
+
+async function signOut(){
+  await msalApp.logoutPopup({account:currentUser});
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('app').style.display='none';
+}
+
+async function getToken(){
+  try{const r=await msalApp.acquireTokenSilent({scopes:SCOPES,account:currentUser});return r.accessToken;}
+  catch{const r=await msalApp.acquireTokenPopup({scopes:SCOPES});return r.accessToken;}
+}
+
+async function onSignedIn(){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app').style.display='flex';
+  const name=currentUser.name||currentUser.username;
+  document.getElementById('user-name').textContent=name;
+  document.getElementById('user-initials').textContent=name.slice(0,2);
+  await loadCustomers();
+}
+
+async function spGetItems(list,filter=''){
+  const token=await getToken();
+  const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items${filter?'?$filter='+filter:'?$top=500'}`;
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  const d=await r.json();
+  return d.d.results;
+}
+
+async function getDigest(token){
+  const r=await fetch(`${SITE_URL}/_api/contextinfo`,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  const d=await r.json();
+  return d.d.GetContextWebInformation.FormDigestValue;
+}
+
+async function spAdd(list,body){
+  const token=await getToken();
+  const mr=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')`,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  const md=await mr.json();
+  body.__metadata={type:md.d.ListItemEntityTypeFullName};
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token)},
+    body:JSON.stringify(body)
+  });
+  return r.json();
+}
+
+async function spUpdate(list,id,body){
+  const token=await getToken();
+  const mr=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')`,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  const md=await mr.json();
+  body.__metadata={type:md.d.ListItemEntityTypeFullName};
+  await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${id})`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token),'IF-MATCH':'*','X-HTTP-Method':'MERGE'},
+    body:JSON.stringify(body)
+  });
+}
+
+async function loadCustomers(){
+  showLoading('顧客データを読み込み中...');
+  try{
+    const items=await spGetItems('顧客リスト');
+    customers=items.map(i=>({
+      id:i.ID,name:i.Title||'（未入力）',kana:i.カナ||'',type:i.種別||'個人',rank:i.ランク||'C',
+      tel:i.電話番号||'',email:i.メールアドレス||'',address:i.住所||'',
+      company:i.勤め先||'',age:i.年齢||'',income:i.年収_万円||'',family:i.家族構成||'',
+      co_name:i.共同申込人_氏名||'',co_company:i.共同申込人_勤め先||'',
+      co_age:i.共同申込人_年齢||'',co_income:i.共同申込人_年収_万円||'',
+      memo:i.備考||'',cases:[],logs:[]
+    }));
+    const caseItems=await spGetItems('案件リスト');
+    for(const c of customers){
+      const cs=caseItems.filter(x=>x.顧客ID==String(c.id));
+      c.cases=cs.map(x=>({
+        id:x.ID,label:x.案件ラベル||'案件①',phase:x.フェーズ||'問合せ',
+        area:x.希望エリア||'',line:x.希望路線||'',station:x.希望駅||'',walk:x.駅距離||'',
+        landSize:x.希望土地面積||'',buildSize:x.希望建物面積||'',budget:x.予算||'',
+        timing:x.購入時期||'',media:x.反響媒体||'',mediaProp:x.反響物件||'',
+        mediaDate:x.反響日?.slice(0,10)||'',memo:x.希望条件備考||''
+      }));
+      if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}];
+    }
+    renderList();
+    showToast('読み込み完了');
+  }catch(e){showToast('エラー: '+e.message,true);}
+  hideLoading();
+}
+
+function renderList(){
+  const q=document.getElementById('search-input').value;
+  const fp=document.getElementById('filter-phase').value;
+  const fr=document.getElementById('filter-rank').value;
+  const f=customers.filter(c=>{
+    if(q&&!c.name.includes(q)&&!c.kana.includes(q)) return false;
+    if(fp&&!c.cases.some(x=>x.phase===fp)) return false;
+    if(fr&&c.rank!==fr) return false;
+    return true;
+  });
+  document.getElementById('list-count').textContent=f.length+'件';
+  document.getElementById('customer-list').innerHTML=f.map(c=>`
+    <div class="cust-item${c.id===selectedId?' active':''}" onclick="selectCustomer(${c.id})">
+      <div class="cust-row1"><span class="cust-name">${c.name}</span><span class="rank-pill r${(c.rank||'d').toLowerCase()}">${c.rank}</span></div>
+      <div class="cust-row2"><span class="phase-dot"></span><span class="cust-phase">${c.cases.map(x=>x.phase).join(' / ')}</span></div>
+    </div>`).join('');
+}
+
+function selectCustomer(id){selectedId=id;selectedCaseIdx=0;renderList();renderDetail();}
+
+function renderDetail(){
+  const c=customers.find(x=>x.id===selectedId);
+  if(!c) return;
+  const cs=c.cases[selectedCaseIdx]||c.cases[0];
+  const ini=c.name.replace(/\s/g,'').slice(0,2);
+  document.getElementById('detail').innerHTML=`
+    <div class="det-head">
+      <div class="det-hero">
+        <div class="det-avatar">${ini}</div>
+        <div><div style="display:flex;align-items:center;gap:8px;"><span class="det-name">${c.name}</span><span class="rank-pill r${(c.rank||'d').toLowerCase()}">${c.rank}</span></div><div class="det-kana">${c.kana}</div></div>
+        <div class="det-actions"><button class="act-btn primary" onclick="saveCustomer()">保存</button></div>
+      </div>
+      <div class="phase-row">
+        <span class="phase-label-sm">フェーズ</span>
+        <div class="phase-badge" onclick="openModal()">${cs.phase} ▾</div>
+      </div>
+    </div>
+    <div class="det-tabs">
+      ${c.cases.map((x,i)=>`<button class="tab-btn${i===selectedCaseIdx?' active':''}" onclick="switchCase(${i})">${x.label}</button>`).join('')}
+      <button class="tab-add" onclick="addCase()">＋</button>
+    </div>
+    <div class="det-body">
+      <div class="sec-card">
+        <div class="sec-title">申込人情報</div>
+        <div class="field-grid">
+          <div class="field-item"><span class="fl">氏名</span><div class="fv"><input value="${c.name}" onchange="cf(${c.id},'name',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">カナ</span><div class="fv"><input value="${c.kana}" onchange="cf(${c.id},'kana',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">種別</span><div class="fv"><select onchange="cf(${c.id},'type',this.value)"><option${c.type==='個人'?' selected':''}>個人</option><option${c.type==='法人'?' selected':''}>法人</option></select></div></div>
+          <div class="field-item"><span class="fl">ランク</span><div class="fv"><select onchange="cf(${c.id},'rank',this.value)">${RANKS.map(r=>`<option${c.rank===r?' selected':''}>${r}</option>`).join('')}</select></div></div>
+          <div class="field-item"><span class="fl">電話番号</span><div class="fv"><input value="${c.tel}" onchange="cf(${c.id},'tel',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">メール</span><div class="fv"><input value="${c.email}" onchange="cf(${c.id},'email',this.value)"/></div></div>
+          <div class="field-item full"><span class="fl">住所</span><div class="fv"><input value="${c.address}" onchange="cf(${c.id},'address',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">勤め先</span><div class="fv"><input value="${c.company}" onchange="cf(${c.id},'company',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${c.age}" onchange="cf(${c.id},'age',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${c.income}" onchange="cf(${c.id},'income',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">家族構成</span><div class="fv"><input value="${c.family}" onchange="cf(${c.id},'family',this.value)"/></div></div>
+        </div>
+      </div>
+      <div class="sec-card">
+        <div class="sec-title">共同申込人</div>
+        <div class="field-grid">
+          <div class="field-item"><span class="fl">氏名</span><div class="fv"><input value="${c.co_name}" onchange="cf(${c.id},'co_name',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">勤め先</span><div class="fv"><input value="${c.co_company}" onchange="cf(${c.id},'co_company',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${c.co_age}" onchange="cf(${c.id},'co_age',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${c.co_income}" onchange="cf(${c.id},'co_income',this.value)"/></div></div>
+        </div>
+      </div>
+      <div class="sec-card">
+        <div class="sec-title">${cs.label} — 反響情報</div>
+        <div class="field-grid three">
+          <div class="field-item"><span class="fl">反響日</span><div class="fv"><input type="date" value="${cs.mediaDate}" onchange="csf('mediaDate',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><select onchange="csf('media',this.value)">${["","SUUMO","HOME'S","at home","自社HP","紹介","電話","メール","新聞折込","その他"].map(m=>`<option${cs.media===m?' selected':''}>${m}</option>`).join('')}</select></div></div>
+          <div class="field-item"><span class="fl">反響物件</span><div class="fv"><input value="${cs.mediaProp}" onchange="csf('mediaProp',this.value)"/></div></div>
+        </div>
+      </div>
+      <div class="sec-card">
+        <div class="sec-title">${cs.label} — 希望条件</div>
+        <div class="field-grid">
+          <div class="field-item"><span class="fl">希望エリア</span><div class="fv"><input value="${cs.area}" onchange="csf('area',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">路線</span><div class="fv"><input value="${cs.line}" onchange="csf('line',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">最寄り駅</span><div class="fv"><input value="${cs.station}" onchange="csf('station',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">駅距離</span><div class="fv"><input value="${cs.walk}" onchange="csf('walk',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">希望土地面積</span><div class="fv"><input value="${cs.landSize}" onchange="csf('landSize',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">希望建物面積</span><div class="fv"><input value="${cs.buildSize}" onchange="csf('buildSize',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">予算</span><div class="fv"><input value="${cs.budget}" onchange="csf('budget',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">購入時期</span><div class="fv"><input value="${cs.timing}" onchange="csf('timing',this.value)"/></div></div>
+          <div class="field-item full"><span class="fl">備考</span><div class="fv"><textarea rows="2" onchange="csf('memo',this.value)">${cs.memo}</textarea></div></div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('phase-grid').innerHTML=PHASES.map(p=>`<div class="phase-opt${p===cs.phase?' selected':''}" onclick="setPhase('${p}')">${p}</div>`).join('');
+}
+
+function cf(id,k,v){const c=customers.find(x=>x.id===id);if(c)c[k]=v;}
+function csf(k,v){const c=customers.find(x=>x.id===selectedId);if(c&&c.cases[selectedCaseIdx])c.cases[selectedCaseIdx][k]=v;}
+function switchCase(i){selectedCaseIdx=i;renderDetail();}
+function addCase(){
+  const c=customers.find(x=>x.id===selectedId);
+  const n=c.cases.length+1;
+  const labels=['①','②','③','④','⑤'];
+  c.cases.push({id:null,label:`案件${labels[n-1]||n}`,phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''});
+  selectedCaseIdx=c.cases.length-1;
+  renderDetail();
+}
+function openModal(){document.getElementById('phase-modal').classList.add('open');}
+function closeModal(){document.getElementById('phase-modal').classList.remove('open');}
+function setPhase(p){
+  const c=customers.find(x=>x.id===selectedId);
+  if(c&&c.cases[selectedCaseIdx])c.cases[selectedCaseIdx].phase=p;
+  closeModal();renderDetail();renderList();
+}
+
+async function saveCustomer(){
+  const c=customers.find(x=>x.id===selectedId);
+  if(!c) return;
+  showLoading('保存中...');
+  try{
+    await spUpdate('顧客リスト',c.id,{
+      Title:c.name,カナ:c.kana,種別:c.type,ランク:c.rank,
+      電話番号:c.tel,メールアドレス:c.email,住所:c.address,
+      勤め先:c.company,年齢:c.age?parseInt(c.age):null,年収_万円:c.income?parseInt(c.income):null,
+      家族構成:c.family,共同申込人_氏名:c.co_name,共同申込人_勤め先:c.co_company,
+      共同申込人_年齢:c.co_age?parseInt(c.co_age):null,共同申込人_年収_万円:c.co_income?parseInt(c.co_income):null,備考:c.memo
+    });
+    for(const cs of c.cases){
+      const body={Title:cs.label,顧客ID:String(c.id),案件ラベル:cs.label,フェーズ:cs.phase,
+        希望エリア:cs.area,希望路線:cs.line,希望駅:cs.station,駅距離:cs.walk,
+        希望土地面積:cs.landSize,希望建物面積:cs.buildSize,予算:cs.budget,購入時期:cs.timing,
+        反響媒体:cs.media,反響物件:cs.mediaProp,反響日:cs.mediaDate||null,希望条件備考:cs.memo};
+      if(cs.id){await spUpdate('案件リスト',cs.id,body);}
+      else{const r=await spAdd('案件リスト',body);cs.id=r.d?.ID;}
+    }
+    showToast('保存しました');renderList();
+  }catch(e){showToast('保存エラー: '+e.message,true);}
+  hideLoading();
+}
+
+async function newCustomer(){
+  showLoading('作成中...');
+  try{
+    const r=await spAdd('顧客リスト',{Title:'新規顧客',種別:'個人',ランク:'C'});
+    const id=r.d.ID;
+    customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',memo:'',cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}],logs:[]});
+    selectedId=id;selectedCaseIdx=0;renderList();renderDetail();
+    showToast('新規顧客を作成しました');
+  }catch(e){showToast('エラー: '+e.message,true);}
+  hideLoading();
+}
+
+function showToast(msg,err=false){const t=document.getElementById('toast');t.textContent=msg;t.style.background=err?'#d94f4f':'#2d9e6b';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+function showLoading(msg){document.getElementById('loading-text').textContent=msg;document.getElementById('loading').classList.add('show');}
+function hideLoading(){document.getElementById('loading').classList.remove('show');}
+
+document.addEventListener('DOMContentLoaded',async()=>{
+  document.getElementById('login-btn').addEventListener('click',signIn);
+  document.getElementById('logout-btn').addEventListener('click',signOut);
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('search-input').addEventListener('input',renderList);
+  document.getElementById('filter-phase').addEventListener('change',renderList);
+  document.getElementById('filter-rank').addEventListener('change',renderList);
+  document.getElementById('new-btn').addEventListener('click',newCustomer);
+  await initMSAL();
+});
+</script>
+</body>
+</html>
