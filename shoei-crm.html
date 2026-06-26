@@ -239,7 +239,7 @@ let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseI
 async function initMSAL(){
   if(!window.msal){alert('MSALライブラリの読み込みに失敗しました。ページを再読み込みしてください。');return;}
   msalApp=new msal.PublicClientApplication({
-    auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:window.location.href.split('?')[0].split('#')[0]},
+    auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:'https://nariki-h.github.io/shoei-crm/shoei-crm.html'},
     cache:{cacheLocation:'sessionStorage'}
   });
   await msalApp.handleRedirectPromise();
