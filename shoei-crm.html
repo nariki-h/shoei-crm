@@ -169,7 +169,7 @@ function loadMSAL(){
   return new Promise((resolve,reject)=>{
     if(window.msal){resolve();return;}
     const s=document.createElement('script');
-    s.src='msal-browser.min.js';
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/msal/2.38.3/msal-browser.min.js';
     s.onload=resolve;
     s.onerror=reject;
     document.head.appendChild(s);
