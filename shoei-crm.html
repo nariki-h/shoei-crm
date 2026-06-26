@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>翔栄リアルエステート CRM</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/msal/2.38.3/msal-browser.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{
@@ -165,19 +166,8 @@ const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All','User.Read'];
 
 let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0;
 
-function loadMSAL(){
-  return new Promise((resolve,reject)=>{
-    if(window.msal){resolve();return;}
-    const s=document.createElement('script');
-    s.src='https://cdnjs.cloudflare.com/ajax/libs/msal/2.38.3/msal-browser.min.js';
-    s.onload=resolve;
-    s.onerror=reject;
-    document.head.appendChild(s);
-  });
-}
-
 async function initMSAL(){
-  await loadMSAL();
+  if(!window.msal){alert('MSALライブラリの読み込みに失敗しました。ページを再読み込みしてください。');return;}
   msalApp=new msal.PublicClientApplication({
     auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:window.location.href.split('?')[0].split('#')[0]},
     cache:{cacheLocation:'sessionStorage'}
