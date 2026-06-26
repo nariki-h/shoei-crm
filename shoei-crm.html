@@ -315,12 +315,22 @@ async function loadCustomers(){
   try{
     const items=await spGetItems('顧客リスト');
     customers=items.map(i=>({
-      id:i.ID,name:i.Title||'（未入力）',kana:i.カナ||'',type:i.種別||'個人',rank:i.ランク||'C',
-      tel:i.電話番号||'',email:i.メールアドレス||'',address:i.住所||'',
-      company:i.勤め先||'',age:i.年齢||'',income:i.年収_万円||'',family:i.家族構成||'',
-      co_name:i.共同申込人_氏名||'',co_company:i.共同申込人_勤め先||'',
-      co_age:i.共同申込人_年齢||'',co_income:i.共同申込人_年収_万円||'',
-      memo:i.備考||'',cases:[],logs:[]
+      id:i.ID,name:i.Title||'（未入力）',
+      kana:i['_x30ab__x30ca_']||'',
+      type:i['_x7a2e__x5225_']||'個人',
+      rank:i['_x30e9__x30f3__x30af_']||'C',
+      tel:i['_x96fb__x8a71__x756a__x53f7_']||'',
+      email:i['_x30e1__x30fc__x30eb__x30a2__x30']||'',
+      address:i['_x4f4f__x6240_']||'',
+      company:i['_x52e4__x3081__x5148_']||'',
+      age:i['_x5e74__x9f62_']||'',
+      income:i['_x5e74__x53ce___x4e07__x5186_']||'',
+      family:i['_x5bb6__x65cf__x69cb__x6210_']||'',
+      co_name:i['_x5171__x540c__x7533__x8fbc__x4e']||'',
+      co_company:i['_x5171__x540c__x7533__x8fbc__x4e0']||'',
+      co_age:i['_x5171__x540c__x7533__x8fbc__x4e1']||'',
+      co_income:i['_x5171__x540c__x7533__x8fbc__x4e2']||'',
+      memo:i['_x5099__x8003_']||'',cases:[],logs:[]
     }));
     const caseItems=await spGetItems('案件リスト');
     for(const c of customers){
@@ -459,11 +469,22 @@ async function saveCustomer(){
   showLoading('保存中...');
   try{
     await spUpdate('顧客リスト',c.id,{
-      Title:c.name,カナ:c.kana,種別:c.type,ランク:c.rank,
-      電話番号:c.tel,メールアドレス:c.email,住所:c.address,
-      勤め先:c.company,年齢:c.age?parseInt(c.age):null,年収_万円:c.income?parseInt(c.income):null,
-      家族構成:c.family,共同申込人_氏名:c.co_name,共同申込人_勤め先:c.co_company,
-      共同申込人_年齢:c.co_age?parseInt(c.co_age):null,共同申込人_年収_万円:c.co_income?parseInt(c.co_income):null,備考:c.memo
+      Title:c.name,
+      '_x30ab__x30ca_':c.kana,
+      '_x7a2e__x5225_':c.type,
+      '_x30e9__x30f3__x30af_':c.rank,
+      '_x96fb__x8a71__x756a__x53f7_':c.tel,
+      '_x30e1__x30fc__x30eb__x30a2__x30':c.email,
+      '_x4f4f__x6240_':c.address,
+      '_x52e4__x3081__x5148_':c.company,
+      '_x5e74__x9f62_':c.age?parseInt(c.age):null,
+      '_x5e74__x53ce___x4e07__x5186_':c.income?parseInt(c.income):null,
+      '_x5bb6__x65cf__x69cb__x6210_':c.family,
+      '_x5171__x540c__x7533__x8fbc__x4e':c.co_name,
+      '_x5171__x540c__x7533__x8fbc__x4e0':c.co_company,
+      '_x5171__x540c__x7533__x8fbc__x4e1':c.co_age?parseInt(c.co_age):null,
+      '_x5171__x540c__x7533__x8fbc__x4e2':c.co_income?parseInt(c.co_income):null,
+      '_x5099__x8003_':c.memo
     });
     for(const cs of c.cases){
       const body={Title:cs.label,顧客ID:String(c.id),案件ラベル:cs.label,フェーズ:cs.phase,
@@ -481,7 +502,7 @@ async function saveCustomer(){
 async function newCustomer(){
   showLoading('作成中...');
   try{
-    const r=await spAdd('顧客リスト',{Title:'新規顧客',種別:'個人',ランク:'C'});
+    const r=await spAdd('顧客リスト',{Title:'新規顧客','_x7a2e__x5225_':'個人','_x30e9__x30f3__x30af_':'C'});
     console.log('spAdd response:', JSON.stringify(r));
     if(!r||!r.d||!r.d.ID){showToast('エラー: SharePointからの応答が不正です。コンソールを確認してください。',true);hideLoading();return;}
     const id=r.d.ID;
