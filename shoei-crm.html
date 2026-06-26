@@ -334,13 +334,13 @@ async function loadCustomers(){
     }));
     const caseItems=await spGetItems('案件リスト');
     for(const c of customers){
-      const cs=caseItems.filter(x=>x.顧客ID==String(c.id));
+      const cs=caseItems.filter(x=>x['_x9867__x5ba2_ID']==String(c.id));
       c.cases=cs.map(x=>({
-        id:x.ID,label:x.案件ラベル||'案件①',phase:x.フェーズ||'問合せ',
-        area:x.希望エリア||'',line:x.希望路線||'',station:x.希望駅||'',walk:x.駅距離||'',
-        landSize:x.希望土地面積||'',buildSize:x.希望建物面積||'',budget:x.予算||'',
-        timing:x.購入時期||'',media:x.反響媒体||'',mediaProp:x.反響物件||'',
-        mediaDate:x.反響日?.slice(0,10)||'',memo:x.希望条件備考||''
+        id:x.ID,label:x['_x6848__x4ef6__x30e9__x30d9__x30']||'案件①',phase:x['_x30d5__x30a7__x30fc__x30ba_']||'問合せ',
+        area:x['_x5e0c__x671b__x30a8__x30ea__x30']||'',line:x['_x5e0c__x671b__x8def__x7dda_']||'',station:x['_x5e0c__x671b__x99c5_']||'',walk:x['_x99c5__x8ddd__x96e2_']||'',
+        landSize:x['_x5e0c__x671b__x571f__x5730__x97']||'',buildSize:x['_x5e0c__x671b__x5efa__x7269__x97']||'',budget:x['_x4e88__x7b97_']||'',
+        timing:x['_x8cfc__x5165__x6642__x671f_']||'',media:x['_x53cd__x97ff__x5a92__x4f53_']||'',mediaProp:x['_x53cd__x97ff__x7269__x4ef6_']||'',
+        mediaDate:x['_x53cd__x97ff__x65e5_']?.slice(0,10)||'',memo:x['_x5e0c__x671b__x6761__x4ef6__x50']||''
       }));
       if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}];
     }
@@ -487,10 +487,22 @@ async function saveCustomer(){
       '_x5099__x8003_':c.memo
     });
     for(const cs of c.cases){
-      const body={Title:cs.label,顧客ID:String(c.id),案件ラベル:cs.label,フェーズ:cs.phase,
-        希望エリア:cs.area,希望路線:cs.line,希望駅:cs.station,駅距離:cs.walk,
-        希望土地面積:cs.landSize,希望建物面積:cs.buildSize,予算:cs.budget,購入時期:cs.timing,
-        反響媒体:cs.media,反響物件:cs.mediaProp,反響日:cs.mediaDate||null,希望条件備考:cs.memo};
+      const body={Title:cs.label,
+        '_x9867__x5ba2_ID':String(c.id),
+        '_x6848__x4ef6__x30e9__x30d9__x30':cs.label,
+        '_x30d5__x30a7__x30fc__x30ba_':cs.phase,
+        '_x5e0c__x671b__x30a8__x30ea__x30':cs.area,
+        '_x5e0c__x671b__x8def__x7dda_':cs.line,
+        '_x5e0c__x671b__x99c5_':cs.station,
+        '_x99c5__x8ddd__x96e2_':cs.walk,
+        '_x5e0c__x671b__x571f__x5730__x97':cs.landSize,
+        '_x5e0c__x671b__x5efa__x7269__x97':cs.buildSize,
+        '_x4e88__x7b97_':cs.budget,
+        '_x8cfc__x5165__x6642__x671f_':cs.timing,
+        '_x53cd__x97ff__x5a92__x4f53_':cs.media,
+        '_x53cd__x97ff__x7269__x4ef6_':cs.mediaProp,
+        '_x53cd__x97ff__x65e5_':cs.mediaDate||null,
+        '_x5e0c__x671b__x6761__x4ef6__x50':cs.memo};
       if(cs.id){await spUpdate('案件リスト',cs.id,body);}
       else{const r=await spAdd('案件リスト',body);cs.id=r.d?.ID;}
     }
