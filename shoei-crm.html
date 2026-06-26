@@ -249,21 +249,17 @@ async function initMSAL(){
 
 async function signIn(){
   try{
-    const r=await msalApp.loginPopup({scopes:SCOPES});
-    currentUser=r.account;
-    onSignedIn();
+    await msalApp.loginRedirect({scopes:SCOPES});
   }catch(e){alert('ログインエラー: '+e.message);}
 }
 
 async function signOut(){
-  await msalApp.logoutPopup({account:currentUser});
-  document.getElementById('login-screen').style.display='flex';
-  document.getElementById('app').style.display='none';
+  await msalApp.logoutRedirect({account:currentUser});
 }
 
 async function getToken(){
   try{const r=await msalApp.acquireTokenSilent({scopes:SCOPES,account:currentUser});return r.accessToken;}
-  catch{const r=await msalApp.acquireTokenPopup({scopes:SCOPES});return r.accessToken;}
+  catch{await msalApp.acquireTokenRedirect({scopes:SCOPES});}
 }
 
 async function onSignedIn(){
