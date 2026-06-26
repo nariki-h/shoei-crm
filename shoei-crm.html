@@ -482,6 +482,8 @@ async function newCustomer(){
   showLoading('作成中...');
   try{
     const r=await spAdd('顧客リスト',{Title:'新規顧客',種別:'個人',ランク:'C'});
+    console.log('spAdd response:', JSON.stringify(r));
+    if(!r||!r.d||!r.d.ID){showToast('エラー: SharePointからの応答が不正です。コンソールを確認してください。',true);hideLoading();return;}
     const id=r.d.ID;
     customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',memo:'',cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}],logs:[]});
     selectedId=id;selectedCaseIdx=0;renderList();renderDetail();
