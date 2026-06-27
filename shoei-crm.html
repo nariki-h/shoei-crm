@@ -374,37 +374,37 @@ async function loadCustomers(){
     window.STAFF_LIST = await loadStaff();
     const items=await spGetItems('顧客リスト');
     customers=items.map(i=>({
-      id:i.ID,name:i.Title||'（未入力）',staff:i['_x62c5__x5f53__x8005_']||'',
-      kana:i['_x30ab__x30ca_']||'',
-      type:i['_x7a2e__x5225_']||'個人',
-      rank:i['_x30e9__x30f3__x30af_']||'C',
-      tel:i['_x96fb__x8a71__x756a__x53f7_']||'',
-      email:i['_x30e1__x30fc__x30eb__x30a2__x30']||'',
-      address:i['_x4f4f__x6240_']||'',
-      company:i['_x52e4__x3081__x5148_']||'',
-      age:i['_x5e74__x9f62_']||'',
-      income:i['_x5e74__x53ce___x4e07__x5186_']||'',
-      family:i['_x5bb6__x65cf__x69cb__x6210_']||'',
-      co_name:i['_x5171__x540c__x7533__x8fbc__x4e']||'',
-      co_company:i['_x5171__x540c__x7533__x8fbc__x4e0']||'',
-      co_age:i['_x5171__x540c__x7533__x8fbc__x4e1']||'',
-      co_income:i['_x5171__x540c__x7533__x8fbc__x4e2']||'',
-      memo:i['_x5099__x8003_']||'',cases:[],logs:[]
+      id:i.ID,name:i.Title||'（未入力）',staff:i['OData__x62c5__x5f53__x8005_']||'',
+      kana:i['OData__x30ab__x30ca_']||'',
+      type:i['OData__x7a2e__x5225_']||'個人',
+      rank:i['OData__x30e9__x30f3__x30af_']||'C',
+      tel:i['OData__x96fb__x8a71__x756a__x53f7_']||'',
+      email:i['OData__x30e1__x30fc__x30eb__x30a2__x30']||'',
+      address:i['OData__x4f4f__x6240_']||'',
+      company:i['OData__x52e4__x3081__x5148_']||'',
+      age:i['OData__x5e74__x9f62_']||'',
+      income:i['OData__x5e74__x53ce___x4e07__x5186_']||'',
+      family:i['OData__x5bb6__x65cf__x69cb__x6210_']||'',
+      co_name:i['OData__x5171__x540c__x7533__x8fbc__x4e']||'',
+      co_company:i['OData__x5171__x540c__x7533__x8fbc__x4e0']||'',
+      co_age:i['OData__x5171__x540c__x7533__x8fbc__x4e1']||'',
+      co_income:i['OData__x5171__x540c__x7533__x8fbc__x4e2']||'',
+      memo:i['OData__x5099__x8003_']||'',cases:[],logs:[]
     }));
     const caseItems=await spGetItems('案件リスト');
     for(const c of customers){
-      const cs=caseItems.filter(x=>x['_x9867__x5ba2_ID']==String(c.id));
+      const cs=caseItems.filter(x=>x['OData__x9867__x5ba2_ID']==String(c.id));
       c.cases=cs.map(x=>({
-        id:x.ID,label:x['_x6848__x4ef6__x30e9__x30d9__x30']||'案件①',phase:x['_x30d5__x30a7__x30fc__x30ba_']||'問合せ',
-        area:x['_x5e0c__x671b__x30a8__x30ea__x30']||'',
-        line:x['_x5e0c__x671b__x8def__x7dda_']||'',
-        lines:JSON.parse(x['_x5e0c__x671b__x8def__x7dda_']||'[]'),
-        station:x['_x5e0c__x671b__x99c5_']||'',
-        stations:JSON.parse(x['_x5e0c__x671b__x99c5_']||'[]'),
-        walk:x['_x99c5__x8ddd__x96e2_']||'',
-        landSize:x['_x5e0c__x671b__x571f__x5730__x97']||'',buildSize:x['_x5e0c__x671b__x5efa__x7269__x97']||'',budget:x['_x4e88__x7b97_']||'',
-        timing:x['_x8cfc__x5165__x6642__x671f_']||'',media:x['_x53cd__x97ff__x5a92__x4f53_']||'',mediaProp:x['_x53cd__x97ff__x7269__x4ef6_']||'',
-        mediaDate:x['_x53cd__x97ff__x65e5_']?.slice(0,10)||'',memo:x['_x5e0c__x671b__x6761__x4ef6__x50']||''
+        id:x.ID,label:x['OData__x6848__x4ef6__x30e9__x30d9__x30']||'案件①',phase:x['OData__x30d5__x30a7__x30fc__x30ba_']||'問合せ',
+        area:x['OData__x5e0c__x671b__x30a8__x30ea__x30']||'',
+        line:x['OData__x5e0c__x671b__x8def__x7dda_']||'',
+        lines:JSON.parse(x['OData__x5e0c__x671b__x8def__x7dda_']||'[]'),
+        station:x['OData__x5e0c__x671b__x99c5_']||'',
+        stations:JSON.parse(x['OData__x5e0c__x671b__x99c5_']||'[]'),
+        walk:x['OData__x99c5__x8ddd__x96e2_']||'',
+        landSize:x['OData__x5e0c__x671b__x571f__x5730__x97']||'',buildSize:x['OData__x5e0c__x671b__x5efa__x7269__x97']||'',budget:x['OData__x4e88__x7b97_']||'',
+        timing:x['OData__x8cfc__x5165__x6642__x671f_']||'',media:x['OData__x53cd__x97ff__x5a92__x4f53_']||'',mediaProp:x['OData__x53cd__x97ff__x7269__x4ef6_']||'',
+        mediaDate:x['OData__x53cd__x97ff__x65e5_']?.slice(0,10)||'',memo:x['OData__x5e0c__x671b__x6761__x4ef6__x50']||''
       }));
       if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}];
     }
@@ -412,12 +412,12 @@ async function loadCustomers(){
     // 活動履歴読み込み
     const logItems=await spGetItems('活動履歴リスト');
     for(const c of customers){
-      const logs=logItems.filter(x=>x['_x6848__x4ef6_ID']==String(c.id));
+      const logs=logItems.filter(x=>x['OData__x6848__x4ef6_ID']==String(c.id));
       c.logs=logs.map(x=>({
-        type:x['_x7a2e__x5225_']||'',
-        date:x['_x65e5__x4ed8_']?.slice(0,10)||'',
-        memo:x['_x5185__x5bb9_']||'',
-        staff:x['_x62c5__x5f53__x8005_']||''
+        type:x['OData__x7a2e__x5225_']||'',
+        date:x['OData__x65e5__x4ed8_']?.slice(0,10)||'',
+        memo:x['OData__x5185__x5bb9_']||'',
+        staff:x['OData__x62c5__x5f53__x8005_']||''
       }));
     }
     showToast('読み込み完了');
@@ -605,40 +605,40 @@ async function saveCustomer(){
   try{
     await spUpdate('顧客リスト',c.id,{
       Title:c.name,
-      '_x62c5__x5f53__x8005_':c.staff,
-      '_x30ab__x30ca_':c.kana,
-      '_x7a2e__x5225_':c.type,
-      '_x30e9__x30f3__x30af_':c.rank,
-      '_x96fb__x8a71__x756a__x53f7_':c.tel,
-      '_x30e1__x30fc__x30eb__x30a2__x30':c.email,
-      '_x4f4f__x6240_':c.address,
-      '_x52e4__x3081__x5148_':c.company,
-      '_x5e74__x9f62_':c.age?parseInt(c.age):null,
-      '_x5e74__x53ce___x4e07__x5186_':c.income?parseInt(c.income):null,
-      '_x5bb6__x65cf__x69cb__x6210_':c.family,
-      '_x5171__x540c__x7533__x8fbc__x4e':c.co_name,
-      '_x5171__x540c__x7533__x8fbc__x4e0':c.co_company,
-      '_x5171__x540c__x7533__x8fbc__x4e1':c.co_age?parseInt(c.co_age):null,
-      '_x5171__x540c__x7533__x8fbc__x4e2':c.co_income?parseInt(c.co_income):null,
-      '_x5099__x8003_':c.memo
+      'OData__x62c5__x5f53__x8005_':c.staff,
+      'OData__x30ab__x30ca_':c.kana,
+      'OData__x7a2e__x5225_':c.type,
+      'OData__x30e9__x30f3__x30af_':c.rank,
+      'OData__x96fb__x8a71__x756a__x53f7_':c.tel,
+      'OData__x30e1__x30fc__x30eb__x30a2__x30':c.email,
+      'OData__x4f4f__x6240_':c.address,
+      'OData__x52e4__x3081__x5148_':c.company,
+      'OData__x5e74__x9f62_':c.age?parseInt(c.age):null,
+      'OData__x5e74__x53ce___x4e07__x5186_':c.income?parseInt(c.income):null,
+      'OData__x5bb6__x65cf__x69cb__x6210_':c.family,
+      'OData__x5171__x540c__x7533__x8fbc__x4e':c.co_name,
+      'OData__x5171__x540c__x7533__x8fbc__x4e0':c.co_company,
+      'OData__x5171__x540c__x7533__x8fbc__x4e1':c.co_age?parseInt(c.co_age):null,
+      'OData__x5171__x540c__x7533__x8fbc__x4e2':c.co_income?parseInt(c.co_income):null,
+      'OData__x5099__x8003_':c.memo
     });
     for(const cs of c.cases){
       const body={Title:cs.label,
-        '_x9867__x5ba2_ID':String(c.id),
-        '_x6848__x4ef6__x30e9__x30d9__x30':cs.label,
-        '_x30d5__x30a7__x30fc__x30ba_':cs.phase,
-        '_x5e0c__x671b__x30a8__x30ea__x30':cs.area,
-        '_x5e0c__x671b__x8def__x7dda_':cs.line,
-        '_x5e0c__x671b__x99c5_':cs.station,
-        '_x99c5__x8ddd__x96e2_':cs.walk,
-        '_x5e0c__x671b__x571f__x5730__x97':cs.landSize,
-        '_x5e0c__x671b__x5efa__x7269__x97':cs.buildSize,
-        '_x4e88__x7b97_':cs.budget,
-        '_x8cfc__x5165__x6642__x671f_':cs.timing,
-        '_x53cd__x97ff__x5a92__x4f53_':cs.media,
-        '_x53cd__x97ff__x7269__x4ef6_':cs.mediaProp,
-        '_x53cd__x97ff__x65e5_':cs.mediaDate||null,
-        '_x5e0c__x671b__x6761__x4ef6__x50':cs.memo};
+        'OData__x9867__x5ba2_ID':String(c.id),
+        'OData__x6848__x4ef6__x30e9__x30d9__x30':cs.label,
+        'OData__x30d5__x30a7__x30fc__x30ba_':cs.phase,
+        'OData__x5e0c__x671b__x30a8__x30ea__x30':cs.area,
+        'OData__x5e0c__x671b__x8def__x7dda_':cs.line,
+        'OData__x5e0c__x671b__x99c5_':cs.station,
+        'OData__x99c5__x8ddd__x96e2_':cs.walk,
+        'OData__x5e0c__x671b__x571f__x5730__x97':cs.landSize,
+        'OData__x5e0c__x671b__x5efa__x7269__x97':cs.buildSize,
+        'OData__x4e88__x7b97_':cs.budget,
+        'OData__x8cfc__x5165__x6642__x671f_':cs.timing,
+        'OData__x53cd__x97ff__x5a92__x4f53_':cs.media,
+        'OData__x53cd__x97ff__x7269__x4ef6_':cs.mediaProp,
+        'OData__x53cd__x97ff__x65e5_':cs.mediaDate||null,
+        'OData__x5e0c__x671b__x6761__x4ef6__x50':cs.memo};
       if(cs.id){await spUpdate('案件リスト',cs.id,body);}
       else{const r=await spAdd('案件リスト',body);cs.id=r.d?.ID;}
     }
@@ -757,11 +757,11 @@ async function saveLog(){
   try{
     await spAdd('活動履歴リスト',{
       Title:c.name+'_'+selectedLogType+'_'+date,
-      '_x6848__x4ef6_ID':String(selectedId),
-      '_x65e5__x4ed8_':date?new Date(date).toISOString():null,
-      '_x7a2e__x5225_':selectedLogType,
-      '_x5185__x5bb9_':memo,
-      '_x62c5__x5f53__x8005_':currentUser?.name||''
+      'OData__x6848__x4ef6_ID':String(selectedId),
+      'OData__x65e5__x4ed8_':date?new Date(date).toISOString():null,
+      'OData__x7a2e__x5225_':selectedLogType,
+      'OData__x5185__x5bb9_':memo,
+      'OData__x62c5__x5f53__x8005_':currentUser?.name||''
     });
     if(!c.logs)c.logs=[];
     c.logs.push({type:selectedLogType,date,memo,staff:currentUser?.name||''});
