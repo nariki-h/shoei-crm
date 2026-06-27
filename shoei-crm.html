@@ -330,7 +330,7 @@ const LIST_TYPES={
 
 async function getListType(list,token){
   if(LIST_TYPES[list])return LIST_TYPES[list];
-  const mr=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${encodeURIComponent(list)}')`,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  const mr=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')`,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
   const md=await mr.json();
   const type=md.d.ListItemEntityTypeFullName;
   LIST_TYPES[list]=type;
@@ -341,7 +341,7 @@ async function spAdd(list,body){
   const token=await getToken();
   const type=await getListType(list,token);
   body.__metadata={type};
-  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${encodeURIComponent(list)}')/items`,{
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items`,{
     method:'POST',
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token)},
     body:JSON.stringify(body)
@@ -353,7 +353,7 @@ async function spUpdate(list,id,body){
   const token=await getToken();
   const type=await getListType(list,token);
   body.__metadata={type};
-  await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${encodeURIComponent(list)}')/items(${id})`,{
+  await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${id})`,{
     method:'POST',
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token),'IF-MATCH':'*','X-HTTP-Method':'MERGE'},
     body:JSON.stringify(body)
