@@ -460,20 +460,6 @@ function renderDetail(){
         </div>
       </div>
       <div class="sec-card">
-        <div class="sec-title">${cs.label} — 希望条件</div>
-        <div class="field-grid">
-          <div class="field-item"><span class="fl">希望エリア</span><div class="fv"><input value="${cs.area}" onchange="csf('area',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">路線</span><div class="fv"><input value="${cs.line}" onchange="csf('line',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">最寄り駅</span><div class="fv"><input value="${cs.station}" onchange="csf('station',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">駅距離</span><div class="fv"><input value="${cs.walk}" onchange="csf('walk',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">希望土地面積</span><div class="fv"><input value="${cs.landSize}" onchange="csf('landSize',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">希望建物面積</span><div class="fv"><input value="${cs.buildSize}" onchange="csf('buildSize',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">予算</span><div class="fv"><input value="${cs.budget}" onchange="csf('budget',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">購入時期</span><div class="fv"><input value="${cs.timing}" onchange="csf('timing',this.value)"/></div></div>
-          <div class="field-item full"><span class="fl">備考</span><div class="fv"><textarea rows="2" onchange="csf('memo',this.value)">${cs.memo}</textarea></div></div>
-        </div>
-      </div>
-      <div class="sec-card">
         <div class="sec-title">活動履歴</div>
         <div class="log-section">
           <div class="log-quick">
@@ -506,7 +492,22 @@ function renderDetail(){
           </div>
         </div>
       </div>
-    </div>`;
+    </div>`
+      <div class="sec-card">
+        <div class="sec-title">${cs.label} — 希望条件</div>
+        <div class="field-grid">
+          <div class="field-item"><span class="fl">希望エリア</span><div class="fv"><input value="${cs.area}" onchange="csf('area',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">路線</span><div class="fv"><input value="${cs.line}" onchange="csf('line',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">最寄り駅</span><div class="fv"><input value="${cs.station}" onchange="csf('station',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">駅距離</span><div class="fv"><input value="${cs.walk}" onchange="csf('walk',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">希望土地面積</span><div class="fv"><input value="${cs.landSize}" onchange="csf('landSize',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">希望建物面積</span><div class="fv"><input value="${cs.buildSize}" onchange="csf('buildSize',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">予算</span><div class="fv"><input value="${cs.budget}" onchange="csf('budget',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">購入時期</span><div class="fv"><input value="${cs.timing}" onchange="csf('timing',this.value)"/></div></div>
+          <div class="field-item full"><span class="fl">備考</span><div class="fv"><textarea rows="2" onchange="csf('memo',this.value)">${cs.memo}</textarea></div></div>
+        </div>
+      </div>
+;
 
   document.getElementById('phase-grid').innerHTML=PHASES.map(p=>`<div class="phase-opt${p===cs.phase?' selected':''}" onclick="setPhase('${p}')">${p}</div>`).join('');
 }
