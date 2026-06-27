@@ -158,6 +158,29 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .loading.show{display:flex;}
 .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
+.log-section{display:flex;flex-direction:column;gap:10px;}
+.log-quick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px;}
+.log-quick-btn{padding:10px 6px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:var(--bg);color:var(--text);text-align:center;transition:all .15s;}
+.log-quick-btn:hover{border-color:var(--accent);background:var(--accent-light);color:var(--accent);}
+.log-quick-btn.selected{border-color:var(--accent);background:var(--accent);color:#fff;}
+.log-form{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.log-form-row{display:flex;gap:8px;align-items:center;}
+.log-form input[type=date]{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--surface);color:var(--text);outline:none;}
+.log-form textarea{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:var(--surface);color:var(--text);outline:none;width:100%;resize:none;font-family:inherit;line-height:1.5;}
+.log-save-btn{padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.log-list{display:flex;flex-direction:column;gap:6px;}
+.log-item{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+.log-item-head{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.log-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;}
+.log-badge.案内{background:#dde7f7;color:#1a5fa8;}
+.log-badge.再案内{background:#e8f4fd;color:#1a5fa8;}
+.log-badge.来社{background:#d4eddf;color:#166534;}
+.log-badge.LP{background:#fdf0d5;color:#8a5c0a;}
+.log-badge.オンライン{background:#ede9fe;color:#5b21b6;}
+.log-badge.その他{background:#f5f5f5;color:#6b7280;}
+.log-date{font-size:11px;color:var(--text-muted);}
+.log-staff{font-size:11px;color:var(--text-sub);margin-left:auto;}
+.log-memo{font-size:12px;color:var(--text);line-height:1.5;}
 </style>
 </head>
 <body>
@@ -345,6 +368,17 @@ async function loadCustomers(){
       if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}];
     }
     renderList();
+    // 活動履歴読み込み
+    const logItems=await spGetItems('活動履歴リスト');
+    for(const c of customers){
+      const logs=logItems.filter(x=>x['_x6848__x4ef6_ID']==String(c.id));
+      c.logs=logs.map(x=>({
+        type:x['_x7a2e__x5225_']||'',
+        date:x['_x65e5__x4ed8_']?.slice(0,10)||'',
+        memo:x['_x5185__x5bb9_']||'',
+        staff:x['_x62c5__x5f53__x8005_']||''
+      }));
+    }
     showToast('読み込み完了');
   }catch(e){showToast('エラー: '+e.message,true);}
   hideLoading();
@@ -439,6 +473,39 @@ function renderDetail(){
           <div class="field-item full"><span class="fl">備考</span><div class="fv"><textarea rows="2" onchange="csf('memo',this.value)">${cs.memo}</textarea></div></div>
         </div>
       </div>
+      <div class="sec-card">
+        <div class="sec-title">活動履歴</div>
+        <div class="log-section">
+          <div class="log-quick">
+            <button class="log-quick-btn" onclick="selectLogType('案内')">🏠 案内</button>
+            <button class="log-quick-btn" onclick="selectLogType('再案内')">🔄 再案内</button>
+            <button class="log-quick-btn" onclick="selectLogType('来社')">🏢 来社</button>
+            <button class="log-quick-btn" onclick="selectLogType('LP')">📊 LP</button>
+            <button class="log-quick-btn" onclick="selectLogType('オンライン')">💻 オンライン</button>
+            <button class="log-quick-btn" onclick="selectLogType('その他')">📝 その他</button>
+          </div>
+          <div class="log-form" id="log-form" style="display:none;">
+            <div class="log-form-row">
+              <input type="date" id="log-date" value="${new Date().toISOString().slice(0,10)}"/>
+              <span id="log-type-label" style="font-size:12px;font-weight:700;color:var(--accent);"></span>
+              <button class="log-save-btn" onclick="saveLog()">記録する</button>
+            </div>
+            <textarea id="log-memo" rows="2" placeholder="メモ（任意）"></textarea>
+          </div>
+          <div class="log-list" id="log-list">
+            ${(c.logs||[]).length===0?'<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:12px;">まだ活動記録がありません</div>':
+            (c.logs||[]).slice().reverse().map(l=>`
+              <div class="log-item">
+                <div class="log-item-head">
+                  <span class="log-badge ${l.type}">${l.type}</span>
+                  <span class="log-date">${l.date}</span>
+                  <span class="log-staff">${l.staff}</span>
+                </div>
+                ${l.memo?`<div class="log-memo">${l.memo}</div>`:''}
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>
     </div>`;
 
   document.getElementById('phase-grid').innerHTML=PHASES.map(p=>`<div class="phase-opt${p===cs.phase?' selected':''}" onclick="setPhase('${p}')">${p}</div>`).join('');
@@ -528,6 +595,38 @@ async function newCustomer(){
 function showToast(msg,err=false){const t=document.getElementById('toast');t.textContent=msg;t.style.background=err?'#d94f4f':'#2d9e6b';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
 function showLoading(msg){document.getElementById('loading-text').textContent=msg;document.getElementById('loading').classList.add('show');}
 function hideLoading(){document.getElementById('loading').classList.remove('show');}
+
+let selectedLogType='';
+function selectLogType(type){
+  selectedLogType=type;
+  document.querySelectorAll('.log-quick-btn').forEach(b=>b.classList.toggle('selected',b.textContent.includes(type)));
+  const form=document.getElementById('log-form');
+  if(form){form.style.display='flex';form.style.flexDirection='column';document.getElementById('log-type-label').textContent=type;}
+}
+
+async function saveLog(){
+  const c=customers.find(x=>x.id===selectedId);
+  if(!c||!selectedLogType){showToast('種別を選択してください',true);return;}
+  const date=document.getElementById('log-date').value;
+  const memo=document.getElementById('log-memo').value;
+  showLoading('記録中...');
+  try{
+    await spAdd('活動履歴リスト',{
+      Title:c.name+'_'+selectedLogType+'_'+date,
+      '_x6848__x4ef6_ID':String(selectedId),
+      '_x65e5__x4ed8_':date?new Date(date).toISOString():null,
+      '_x7a2e__x5225_':selectedLogType,
+      '_x5185__x5bb9_':memo,
+      '_x62c5__x5f53__x8005_':currentUser?.name||''
+    });
+    if(!c.logs)c.logs=[];
+    c.logs.push({type:selectedLogType,date,memo,staff:currentUser?.name||''});
+    selectedLogType='';
+    renderDetail();
+    showToast('活動を記録しました');
+  }catch(e){showToast('エラー: '+e.message,true);}
+  hideLoading();
+}
 
 document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('login-btn').addEventListener('click',signIn);
