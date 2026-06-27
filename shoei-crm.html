@@ -309,7 +309,7 @@ async function onSignedIn(){
 
 async function spGetItems(list,filter=''){
   const token=await getToken();
-  const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items${filter?'?$filter='+filter:'?$top=500'}`;
+  const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items?$select=*${filter?'&$filter='+filter:'&$top=500'}`;
   const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
   const d=await r.json();
   return d.d.results;
@@ -414,6 +414,7 @@ async function loadCustomers(){
     for(const c of customers){
       const logs=logItems.filter(x=>x['OData__x6848__x4ef6_ID']==String(c.id));
       c.logs=logs.map(x=>({
+        id:x.ID,
         type:x['OData__x7a2e__x5225_']||'',
         date:x['OData__x65e5__x4ed8_']?.slice(0,10)||'',
         memo:x['OData__x5185__x5bb9_']||'',
@@ -518,6 +519,9 @@ function renderDetail(){
           <div class="log-form" id="log-form" style="display:none;">
             <div class="log-form-row">
               <input type="date" id="log-date" value="${new Date().toISOString().slice(0,10)}"/>
+              <select id="log-staff-select" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+                ${(window.STAFF_LIST||[]).map(s=>`<option value="${s}">${s}</option>`).join('')}
+              </select>
               <span id="log-type-label" style="font-size:12px;font-weight:700;color:var(--accent);"></span>
               <button class="log-save-btn" onclick="saveLog()">記録する</button>
             </div>
@@ -531,6 +535,7 @@ function renderDetail(){
                   <span class="log-badge ${l.type}">${l.type}</span>
                   <span class="log-date">${l.date}</span>
                   <span class="log-staff">${l.staff}</span>
+                  ${l.id?`<button onclick="deleteLog(${l.id},${c.id})" style="margin-left:auto;border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:11px;padding:2px 4px;" title="削除">✕</button>`:''}
                 </div>
                 ${l.memo?`<div class="log-memo">${l.memo}</div>`:''}
               </div>`).join('')}
@@ -647,6 +652,24 @@ async function saveCustomer(){
   hideLoading();
 }
 
+async function deleteLog(logId, custId){
+  if(!confirm('この活動記録を削除しますか？')) return;
+  showLoading('削除中...');
+  try{
+    const token=await getToken();
+    const digest=await getDigest(token);
+    await fetch(`${SITE_URL}/_api/web/lists/getbytitle('活動履歴リスト')/items(${logId})`,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'X-RequestDigest':digest,'IF-MATCH':'*','X-HTTP-Method':'DELETE'}
+    });
+    const c=customers.find(x=>x.id===custId);
+    if(c) c.logs=c.logs.filter(l=>l.id!==logId);
+    renderDetail();
+    showToast('削除しました');
+  }catch(e){showToast('削除エラー: '+e.message,true);}
+  hideLoading();
+}
+
 async function deleteCustomer(id){
   if(!confirm('この顧客を削除しますか？\n※案件・活動履歴も削除されます')) return;
   showLoading('削除中...');
@@ -753,18 +776,19 @@ async function saveLog(){
   if(!c||!selectedLogType){showToast('種別を選択してください',true);return;}
   const date=document.getElementById('log-date').value;
   const memo=document.getElementById('log-memo').value;
+  const staffSel=document.getElementById('log-staff-select')?.value||currentUser?.name||'';
   showLoading('記録中...');
   try{
-    await spAdd('活動履歴リスト',{
+    const r=await spAdd('活動履歴リスト',{
       Title:c.name+'_'+selectedLogType+'_'+date,
       'OData__x6848__x4ef6_ID':String(selectedId),
       'OData__x65e5__x4ed8_':date?new Date(date).toISOString():null,
       'OData__x7a2e__x5225_':selectedLogType,
       'OData__x5185__x5bb9_':memo,
-      'OData__x62c5__x5f53__x8005_':currentUser?.name||''
+      'OData__x62c5__x5f53__x8005_':staffSel
     });
     if(!c.logs)c.logs=[];
-    c.logs.push({type:selectedLogType,date,memo,staff:currentUser?.name||''});
+    c.logs.push({id:r.d?.ID,type:selectedLogType,date,memo,staff:staffSel});
     selectedLogType='';
     renderDetail();
     showToast('活動を記録しました');
