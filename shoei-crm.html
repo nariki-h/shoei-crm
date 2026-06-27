@@ -492,7 +492,6 @@ function renderDetail(){
           </div>
         </div>
       </div>
-    </div>`
       <div class="sec-card">
         <div class="sec-title">${cs.label} — 希望条件</div>
         <div class="field-grid">
@@ -507,7 +506,7 @@ function renderDetail(){
           <div class="field-item full"><span class="fl">備考</span><div class="fv"><textarea rows="2" onchange="csf('memo',this.value)">${cs.memo}</textarea></div></div>
         </div>
       </div>
-;
+    </div>`;
 
   document.getElementById('phase-grid').innerHTML=PHASES.map(p=>`<div class="phase-opt${p===cs.phase?' selected':''}" onclick="setPhase('${p}')">${p}</div>`).join('');
 }
