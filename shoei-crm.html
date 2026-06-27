@@ -321,12 +321,27 @@ async function getDigest(token){
   return d.d.GetContextWebInformation.FormDigestValue;
 }
 
+const LIST_TYPES={
+  '顧客リスト':'SP.Data.ListListItem',
+  '案件リスト':'SP.Data.List1ListItem',
+  '活動履歴リスト':'SP.Data.List2ListItem',
+  '担当者マスター':'SP.Data.List3ListItem'
+};
+
+async function getListType(list,token){
+  if(LIST_TYPES[list])return LIST_TYPES[list];
+  const mr=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${encodeURIComponent(list)}')`,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  const md=await mr.json();
+  const type=md.d.ListItemEntityTypeFullName;
+  LIST_TYPES[list]=type;
+  return type;
+}
+
 async function spAdd(list,body){
   const token=await getToken();
-  const mr=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')`,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
-  const md=await mr.json();
-  body.__metadata={type:md.d.ListItemEntityTypeFullName};
-  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items`,{
+  const type=await getListType(list,token);
+  body.__metadata={type};
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${encodeURIComponent(list)}')/items`,{
     method:'POST',
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token)},
     body:JSON.stringify(body)
@@ -336,10 +351,9 @@ async function spAdd(list,body){
 
 async function spUpdate(list,id,body){
   const token=await getToken();
-  const mr=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')`,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
-  const md=await mr.json();
-  body.__metadata={type:md.d.ListItemEntityTypeFullName};
-  await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${id})`,{
+  const type=await getListType(list,token);
+  body.__metadata={type};
+  await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${encodeURIComponent(list)}')/items(${id})`,{
     method:'POST',
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token),'IF-MATCH':'*','X-HTTP-Method':'MERGE'},
     body:JSON.stringify(body)
