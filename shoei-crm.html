@@ -212,6 +212,7 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
     <div class="header-user">
       <div class="header-avatar" id="user-initials">--</div>
       <span id="user-name">--</span>
+      <a href="https://nariki-h.github.io/shoei-crm/dashboard.html" style="padding:6px 12px;background:rgba(255,255,255,.1);color:#fff;border:none;border-radius:6px;font-size:12px;text-decoration:none;">📊 ダッシュボード</a>
       <button class="header-btn" id="logout-btn">ログアウト</button>
     </div>
   </div>
@@ -381,7 +382,12 @@ async function loadCustomers(){
       const cs=caseItems.filter(x=>x['_x9867__x5ba2_ID']==String(c.id));
       c.cases=cs.map(x=>({
         id:x.ID,label:x['_x6848__x4ef6__x30e9__x30d9__x30']||'案件①',phase:x['_x30d5__x30a7__x30fc__x30ba_']||'問合せ',
-        area:x['_x5e0c__x671b__x30a8__x30ea__x30']||'',line:x['_x5e0c__x671b__x8def__x7dda_']||'',station:x['_x5e0c__x671b__x99c5_']||'',walk:x['_x99c5__x8ddd__x96e2_']||'',
+        area:x['_x5e0c__x671b__x30a8__x30ea__x30']||'',
+        line:x['_x5e0c__x671b__x8def__x7dda_']||'',
+        lines:JSON.parse(x['_x5e0c__x671b__x8def__x7dda_']||'[]'),
+        station:x['_x5e0c__x671b__x99c5_']||'',
+        stations:JSON.parse(x['_x5e0c__x671b__x99c5_']||'[]'),
+        walk:x['_x99c5__x8ddd__x96e2_']||'',
         landSize:x['_x5e0c__x671b__x571f__x5730__x97']||'',buildSize:x['_x5e0c__x671b__x5efa__x7269__x97']||'',budget:x['_x4e88__x7b97_']||'',
         timing:x['_x8cfc__x5165__x6642__x671f_']||'',media:x['_x53cd__x97ff__x5a92__x4f53_']||'',mediaProp:x['_x53cd__x97ff__x7269__x4ef6_']||'',
         mediaDate:x['_x53cd__x97ff__x65e5_']?.slice(0,10)||'',memo:x['_x5e0c__x671b__x6761__x4ef6__x50']||''
@@ -529,20 +535,22 @@ function renderDetail(){
             </div>
             <div class="selected-display" id="area-disp-${selectedId}">${cs.area||'未選択'}</div>
           </div>
-          <div class="field-item"><span class="fl">路線</span>
-            <div class="selector-wrap">
-              <button class="selector-trigger" onclick="toggleDropdown('line-dd',event)">路線を選択</button>
-              <div class="selector-dropdown" id="line-dd">
-                <div class="selector-tags">${Object.keys(RAILWAYS).map(l=>`<span class="selector-tag${cs.line===l?' selected':''}" onclick="selectLine('${l}',this)">${l}</span>`).join('')}</div>
+          <div class="field-item full"><span class="fl">路線・駅（最大3つ）</span>
+            ${[0,1,2].map(idx2=>`
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+              <div class="selector-wrap" style="flex:1;">
+                <button class="selector-trigger" onclick="toggleDropdown('line-dd-${idx2}',event)">${(cs.lines&&cs.lines[idx2])||'路線を選択'}</button>
+                <div class="selector-dropdown" id="line-dd-${idx2}">
+                  <div class="selector-tags">${Object.keys(RAILWAYS).map(l=>`<span class="selector-tag${(cs.lines&&cs.lines[idx2]===l)?' selected':''}" onclick="selectLine2(${idx2},'${l}',this)">${l}</span>`).join('')}</div>
+                </div>
               </div>
-            </div>
-            <div class="selected-display">${cs.line||'未選択'}</div>
-          </div>
-          <div class="field-item"><span class="fl">最寄り駅</span>
-            <div class="fv"><select id="station-select" onchange="csf('station',this.value)">
-              <option value="">駅を選択</option>
-              ${cs.line&&RAILWAYS[cs.line]?RAILWAYS[cs.line].map(s=>`<option${cs.station===s?' selected':''}>${s}</option>`).join(''):''}
-            </select></div>
+              <div class="fv" style="flex:1;">
+                <select id="station-select-${idx2}" onchange="selectStation2(${idx2},this.value)">
+                  <option value="">駅を選択</option>
+                  ${cs.lines&&cs.lines[idx2]&&RAILWAYS[cs.lines[idx2]]?RAILWAYS[cs.lines[idx2]].map(s=>`<option${cs.stations&&cs.stations[idx2]===s?' selected':''}>${s}</option>`).join(''):''}
+                </select>
+              </div>
+            </div>`).join('')}
           </div>
           <div class="field-item"><span class="fl">駅距離（分）</span><div class="fv"><input type="number" min="0" max="60" value="${cs.walk}" onchange="csf('walk',this.value)" placeholder="例：5"/></div></div>
           <div class="field-item"><span class="fl">希望土地面積</span><div class="fv"><input value="${cs.landSize}" onchange="csf('landSize',this.value)"/></div></div>
@@ -564,7 +572,7 @@ function addCase(){
   const c=customers.find(x=>x.id===selectedId);
   const n=c.cases.length+1;
   const labels=['①','②','③','④','⑤'];
-  c.cases.push({id:null,label:`案件${labels[n-1]||n}`,phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''});
+  c.cases.push({id:null,label:`案件${labels[n-1]||n}`,phase:'問合せ',area:'',line:'',lines:[],station:'',stations:[],walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''});
   selectedCaseIdx=c.cases.length-1;
   renderDetail();
 }
@@ -685,24 +693,38 @@ function toggleArea(custId, area, el){
   if(trigger)trigger.textContent=areas.join('、')||'エリアを選択';
 }
 
-// 路線選択→駅更新
-function selectLine(line, el){
+// 路線選択→駅更新（3路線対応）
+function selectLine2(idx2, line, el){
   const c=customers.find(x=>x.id===selectedId);
   if(!c||!c.cases[selectedCaseIdx])return;
-  c.cases[selectedCaseIdx].line=line;
-  c.cases[selectedCaseIdx].station='';
-  document.querySelectorAll('#line-dd .selector-tag').forEach(t=>t.classList.remove('selected'));
+  if(!c.cases[selectedCaseIdx].lines)c.cases[selectedCaseIdx].lines=[];
+  if(!c.cases[selectedCaseIdx].stations)c.cases[selectedCaseIdx].stations=[];
+  c.cases[selectedCaseIdx].lines[idx2]=line;
+  c.cases[selectedCaseIdx].stations[idx2]='';
+  // 保存用にline/stationも更新
+  c.cases[selectedCaseIdx].line=JSON.stringify(c.cases[selectedCaseIdx].lines);
+  // ボタン表示更新
+  el.closest('.selector-wrap').querySelector('.selector-trigger').textContent=line;
+  el.closest('.selector-dropdown').querySelectorAll('.selector-tag').forEach(t=>t.classList.remove('selected'));
   el.classList.add('selected');
-  el.closest('.selector-wrap').querySelector('.selected-display,.selector-trigger').nextElementSibling && (el.closest('.field-item').querySelector('.selected-display').textContent=line);
+  el.closest('.selector-dropdown').classList.remove('open');
   // 駅リスト更新
-  const sel=document.getElementById('station-select');
+  const sel=document.getElementById('station-select-'+idx2);
   if(sel){
     sel.innerHTML='<option value="">駅を選択</option>'+(RAILWAYS[line]||[]).map(s=>`<option>${s}</option>`).join('');
   }
-  // 表示更新
-  const trigger=el.closest('.field-item').querySelector('.selector-trigger');
-  if(trigger)trigger.textContent=line;
 }
+
+function selectStation2(idx2, station){
+  const c=customers.find(x=>x.id===selectedId);
+  if(!c||!c.cases[selectedCaseIdx])return;
+  if(!c.cases[selectedCaseIdx].stations)c.cases[selectedCaseIdx].stations=[];
+  c.cases[selectedCaseIdx].stations[idx2]=station;
+  c.cases[selectedCaseIdx].station=JSON.stringify(c.cases[selectedCaseIdx].stations);
+}
+
+// 旧関数（互換性維持）
+function selectLine(line, el){selectLine2(0,line,el);}
 
 let selectedLogType='';
 function selectLogType(type){
