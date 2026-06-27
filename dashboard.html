@@ -371,7 +371,7 @@ async function loadData(){
 function calcKPI(customers, cases, logs, staff, year, month){
   // 反響数：顧客の登録月×担当者
   const myCustomers=customers.filter(c=>{
-    const isStaff=!staff||(c['_x62c5__x5f53__x8005_']||'')===(staff||'');
+    const isStaff=!staff||(c['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
     const inM=inMonth(c.Created,year,month);
     return isStaff&&inM;
   });
@@ -383,30 +383,30 @@ function calcKPI(customers, cases, logs, staff, year, month){
   const raishaTypes=['来社','LP','オンライン'];
 
   const myLogs=logs.filter(l=>{
-    const isStaff=!staff||(l['_x62c5__x5f53__x8005_']||'')===(staff||'');
-    const inM=inMonth(l['_x65e5__x4ed8_'],year,month);
+    const isStaff=!staff||(l['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const inM=inMonth(l['OData__x65e5__x4ed8_'],year,month);
     return isStaff&&inM;
   });
 
   // Contact：その月に初めて会った顧客数（案件IDごとにユニーク）
   const contactedCaseIds=new Set(
-    myLogs.filter(l=>contactTypes.includes(l['_x7a2e__x5225_']||'')).map(l=>l['_x6848__x4ef6_ID'])
+    myLogs.filter(l=>contactTypes.includes(l['OData__x7a2e__x5225_']||'')).map(l=>l['OData__x6848__x4ef6_ID'])
   );
   const contactCount=contactedCaseIds.size;
 
   // 案内数・来社数・再案内数
-  const annaiCount=myLogs.filter(l=>annaiTypes.includes(l['_x7a2e__x5225_']||'')).length;
-  const raishaCount=myLogs.filter(l=>raishaTypes.includes(l['_x7a2e__x5225_']||'')).length;
-  const reannaiCount=myLogs.filter(l=>(l['_x7a2e__x5225_']||'')==='再案内').length;
+  const annaiCount=myLogs.filter(l=>annaiTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const raishaCount=myLogs.filter(l=>raishaTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const reannaiCount=myLogs.filter(l=>(l['OData__x7a2e__x5225_']||'')==='再案内').length;
 
   // 契約数：案件のフェーズが契約済以上の顧客（案件の更新月で判定→暫定的にフェーズで）
   const keiyakuPhases=['契約済','融資承認','決済済'];
   const myContracts=cases.filter(c=>{
-    const custId=c['_x9867__x5ba2_ID'];
+    const custId=c['OData__x9867__x5ba2_ID'];
     const cust=customers.find(x=>String(x.ID)===custId);
     if(!cust)return false;
-    const isStaff=!staff||(cust['_x62c5__x5f53__x8005_']||'')===(staff||'');
-    const phase=c['_x30d5__x30a7__x30fc__x30ba_']||'';
+    const isStaff=!staff||(cust['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
     const inM=inMonth(c.Modified,year,month);
     return isStaff&&keiyakuPhases.includes(phase)&&inM;
   });
