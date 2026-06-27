@@ -295,7 +295,7 @@ function onSignedIn(){
 // SharePoint
 async function spGetItems(list,filter=''){
   const token=await getToken();
-  const url=`${SITE_URL}/_api/web/lists/getbytitle('${encodeURIComponent(list)}')/items${filter?'?$filter='+encodeURIComponent(filter)+'&$top=2000':'?$top=2000'}`;
+  const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items${filter?'?$filter='+encodeURIComponent(filter)+'&$top=2000':'?$top=2000'}`;
   const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
   const d=await r.json();
   return d.d?.results||[];
