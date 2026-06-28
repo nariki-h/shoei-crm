@@ -155,6 +155,9 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 @keyframes spin{to{transform:rotate(360deg);}}
 .toast{position:fixed;bottom:24px;right:24px;background:#2d9e6b;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;}
 .toast.show{opacity:1;}
+.ctrl-group{display:flex;align-items:center;gap:8px;}
+.date-input{padding:6px 10px;border:1px solid #d0d0d0;border-radius:6px;font-size:13px;background:#fff;color:#1a1a2e;cursor:pointer;}
+.date-input:focus{outline:none;border-color:#2d9e6b;}
 </style>
 </head>
 <body>
@@ -182,17 +185,43 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   </div>
 
   <div class="controls">
-    <span class="ctrl-label">表示月</span>
-    <div class="month-nav">
-      <button class="month-btn" onclick="changeMonth(-1)">◀</button>
-      <div class="month-display" id="month-display"></div>
-      <button class="month-btn" onclick="changeMonth(1)">▶</button>
-    </div>
-    <select class="range-select" id="range-select" onchange="loadData()">
-      <option value="1">当月のみ</option>
-      <option value="3">過去3ヶ月</option>
-      <option value="6">過去6ヶ月</option>
+    <span class="ctrl-label">表示モード</span>
+    <select class="range-select" id="mode-select" onchange="onModeChange()">
+      <option value="month">月別</option>
+      <option value="range">期間指定</option>
+      <option value="year">年間</option>
     </select>
+
+    <!-- 月別モード -->
+    <div id="ctrl-month" class="ctrl-group">
+      <div class="month-nav">
+        <button class="month-btn" onclick="changeMonth(-1)">◀</button>
+        <div class="month-display" id="month-display"></div>
+        <button class="month-btn" onclick="changeMonth(1)">▶</button>
+      </div>
+      <select class="range-select" id="range-select" onchange="loadData()">
+        <option value="1">当月のみ</option>
+        <option value="3">過去3ヶ月</option>
+        <option value="6">過去6ヶ月</option>
+      </select>
+    </div>
+
+    <!-- 期間指定モード -->
+    <div id="ctrl-range" class="ctrl-group" style="display:none;">
+      <span class="ctrl-label">開始</span>
+      <input type="month" id="date-from" class="date-input">
+      <span class="ctrl-label">〜 終了</span>
+      <input type="month" id="date-to" class="date-input">
+      <button class="refresh-btn" onclick="loadData()">適用</button>
+    </div>
+
+    <!-- 年間モード -->
+    <div id="ctrl-year" class="ctrl-group" style="display:none;">
+      <button class="month-btn" onclick="changeYear(-1)">◀</button>
+      <div class="month-display" id="year-display"></div>
+      <button class="month-btn" onclick="changeYear(1)">▶</button>
+    </div>
+
     <button class="refresh-btn" onclick="loadData()">🔄 更新</button>
   </div>
 
@@ -249,6 +278,8 @@ const TARGET_RAISHA=8;
 let msalApp=null, currentUser=null;
 let currentYear=new Date().getFullYear();
 let currentMonth=new Date().getMonth()+1;
+let currentYearDisplay=new Date().getFullYear();
+let currentMode='month'; // 'month' | 'range' | 'year'
 
 // MSAL
 async function initMSAL(){
@@ -289,6 +320,7 @@ function onSignedIn(){
   document.getElementById('app').style.display='block';
   document.getElementById('user-name').textContent=currentUser?.name||'';
   updateMonthDisplay();
+  updateYearDisplay();
   loadData();
 }
 
@@ -301,10 +333,34 @@ async function spGetItems(list,filter=''){
   return d.d?.results||[];
 }
 
+// モード切替
+function onModeChange(){
+  currentMode=document.getElementById('mode-select').value;
+  document.getElementById('ctrl-month').style.display=currentMode==='month'?'flex':'none';
+  document.getElementById('ctrl-range').style.display=currentMode==='range'?'flex':'none';
+  document.getElementById('ctrl-year').style.display=currentMode==='year'?'flex':'none';
+  // 期間指定の初期値
+  if(currentMode==='range'){
+    const now=new Date();
+    const y=now.getFullYear();
+    const m=String(now.getMonth()+1).padStart(2,'0');
+    const fromM=String(now.getMonth()-2>0?now.getMonth()-2:now.getMonth()+10).padStart(2,'0');
+    const fromY=now.getMonth()-2>0?y:y-1;
+    document.getElementById('date-from').value=`${fromY}-${fromM}`;
+    document.getElementById('date-to').value=`${y}-${m}`;
+  }
+  loadData();
+}
+
 // 月表示
 function updateMonthDisplay(){
   document.getElementById('month-display').textContent=`${currentYear}年${currentMonth}月`;
   document.getElementById('summary-title').textContent=`${currentYear}年${currentMonth}月 サマリー`;
+}
+
+function updateYearDisplay(){
+  document.getElementById('year-display').textContent=`${currentYearDisplay}年`;
+  document.getElementById('summary-title').textContent=`${currentYearDisplay}年 年間サマリー`;
 }
 
 function changeMonth(delta){
@@ -315,14 +371,41 @@ function changeMonth(delta){
   loadData();
 }
 
+function changeYear(delta){
+  currentYearDisplay+=delta;
+  updateYearDisplay();
+  loadData();
+}
+
+// 表示対象の月リストを返す
 function getMonthRange(){
+  if(currentMode==='year'){
+    // 1月〜12月
+    return Array.from({length:12},(_,i)=>({year:currentYearDisplay,month:i+1}));
+  }
+  if(currentMode==='range'){
+    const fromVal=document.getElementById('date-from').value;
+    const toVal=document.getElementById('date-to').value;
+    if(!fromVal||!toVal)return [{year:currentYear,month:currentMonth}];
+    const [fy,fm]=fromVal.split('-').map(Number);
+    const [ty,tm]=toVal.split('-').map(Number);
+    const months=[];
+    let y=fy,m=fm;
+    while(y<ty||(y===ty&&m<=tm)){
+      months.push({year:y,month:m});
+      m++;if(m>12){m=1;y++;}
+      if(months.length>36)break; // 安全装置
+    }
+    return months;
+  }
+  // 月別モード
   const range=parseInt(document.getElementById('range-select').value);
   const months=[];
   for(let i=range-1;i>=0;i--){
     let m=currentMonth-i;
     let y=currentYear;
     while(m<1){m+=12;y--;}
-    months.push({year:y,month:m,label:`${y}年${m}月`});
+    months.push({year:y,month:m});
   }
   return months;
 }
@@ -331,6 +414,11 @@ function inMonth(dateStr,year,month){
   if(!dateStr)return false;
   const d=new Date(dateStr);
   return d.getFullYear()===year&&d.getMonth()+1===month;
+}
+
+// 期間内かどうか（開始〜終了月を含む全月）
+function inPeriod(dateStr,months){
+  return months.some(({year,month})=>inMonth(dateStr,year,month));
 }
 
 // データ読み込み・集計
@@ -348,19 +436,28 @@ async function loadData(){
     if(staffList.length===0)staffList.push('金光善慶','馬場紘一','村上光南');
 
     const months=getMonthRange();
-    const range=parseInt(document.getElementById('range-select').value);
+    const isMulti=months.length>1;
 
-    // 当月データ集計
-    const {year:cy,month:cm}=months[months.length-1];
-    renderSummary(customers,cases,logs,staffList,cy,cm);
-    renderKPITable(customers,cases,logs,staffList,cy,cm);
-
-    // 月次推移（複数月の場合）
-    if(range>1){
+    if(currentMode==='year'||currentMode==='range'){
+      // 年間・期間指定：期間合計サマリー＋月次推移
+      document.getElementById('summary-title').textContent=
+        currentMode==='year'?`${currentYearDisplay}年 年間サマリー`
+        :`${months[0].year}年${months[0].month}月〜${months[months.length-1].year}年${months[months.length-1].month}月 サマリー`;
+      renderSummaryPeriod(customers,cases,logs,staffList,months);
+      renderKPITablePeriod(customers,cases,logs,staffList,months);
       renderTrend(customers,cases,logs,staffList,months);
       document.getElementById('trend-section').style.display='block';
-    }else{
-      document.getElementById('trend-section').style.display='none';
+    } else {
+      // 月別モード（従来通り）
+      const {year:cy,month:cm}=months[months.length-1];
+      renderSummary(customers,cases,logs,staffList,cy,cm);
+      renderKPITable(customers,cases,logs,staffList,cy,cm);
+      if(isMulti){
+        renderTrend(customers,cases,logs,staffList,months);
+        document.getElementById('trend-section').style.display='block';
+      }else{
+        document.getElementById('trend-section').style.display='none';
+      }
     }
 
     showToast('更新しました');
@@ -416,6 +513,116 @@ function calcKPI(customers, cases, logs, staff, year, month){
   const seizyakuRate=hankyoCount>0?Math.round(myContracts.length/hankyoCount*100):null;
 
   return {hankyoCount,contactCount,conRate,annaiCount,raishaCount,reannaiCount,keiyakuCount:myContracts.length,raishaRate,seizyakuRate};
+}
+
+// 期間合計KPI（複数月をまとめて集計）
+function calcKPIPeriod(customers,cases,logs,staff,months){
+  const contactTypes=['案内','再案内','来社','LP','オンライン'];
+  const annaiTypes=['案内','再案内','来社','LP','オンライン'];
+  const raishaTypes=['来社','LP','オンライン'];
+  const keiyakuPhases=['契約済','融資承認','決済済'];
+
+  const myCustomers=customers.filter(c=>{
+    const isStaff=!staff||(c['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    return isStaff&&inPeriod(c.Created,months);
+  });
+  const hankyoCount=myCustomers.length;
+
+  const myLogs=logs.filter(l=>{
+    const isStaff=!staff||(l['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    return isStaff&&inPeriod(l['OData__x65e5__x4ed8_'],months);
+  });
+
+  const contactedCaseIds=new Set(
+    myLogs.filter(l=>contactTypes.includes(l['OData__x7a2e__x5225_']||'')).map(l=>l['OData__x6848__x4ef6_ID'])
+  );
+  const contactCount=contactedCaseIds.size;
+  const annaiCount=myLogs.filter(l=>annaiTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const raishaCount=myLogs.filter(l=>raishaTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const reannaiCount=myLogs.filter(l=>(l['OData__x7a2e__x5225_']||'')==='再案内').length;
+
+  const myContracts=cases.filter(c=>{
+    const custId=c['OData__x9867__x5ba2_ID'];
+    const cust=customers.find(x=>String(x.ID)===custId);
+    if(!cust)return false;
+    const isStaff=!staff||(cust['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
+    return isStaff&&keiyakuPhases.includes(phase)&&inPeriod(c.Modified,months);
+  });
+
+  const conRate=hankyoCount>0?Math.round(contactCount/hankyoCount*100):null;
+  const raishaRate=contactCount>0?Math.round(raishaCount/contactCount*100):null;
+  const seizyakuRate=hankyoCount>0?Math.round(myContracts.length/hankyoCount*100):null;
+  return {hankyoCount,contactCount,conRate,annaiCount,raishaCount,reannaiCount,keiyakuCount:myContracts.length,raishaRate,seizyakuRate};
+}
+
+function renderSummaryPeriod(customers,cases,logs,staffList,months){
+  const total=calcKPIPeriod(customers,cases,logs,null,months);
+  const annaiTarget=TARGET_ANNAI*months.length;
+  const raishaTarget=TARGET_RAISHA*months.length;
+  const annaiPct=Math.min(100,Math.round(total.annaiCount/annaiTarget*100));
+  const raishaPct=Math.min(100,Math.round(total.raishaCount/raishaTarget*100));
+  document.getElementById('summary-row').innerHTML=`
+    <div class="summary-card">
+      <div class="summary-label">反響数</div>
+      <div class="summary-val">${total.hankyoCount}</div>
+      <div class="summary-sub">${months.length}ヶ月合計</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Contact数</div>
+      <div class="summary-val">${total.contactCount}</div>
+      <div class="summary-sub">Con率 ${total.conRate!=null?total.conRate+'%':'—'}</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">案内数</div>
+      <div class="summary-val ${total.annaiCount>=annaiTarget?'good':total.annaiCount>=annaiTarget*0.7?'warn':'bad'}">${total.annaiCount}</div>
+      <div class="summary-target">目標 ${annaiTarget}件</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${annaiPct}%;background:${annaiPct>=100?'#176b47':annaiPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">来社数</div>
+      <div class="summary-val ${total.raishaCount>=raishaTarget?'good':total.raishaCount>=raishaTarget*0.7?'warn':'bad'}">${total.raishaCount}</div>
+      <div class="summary-target">目標 ${raishaTarget}件</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${raishaPct}%;background:${raishaPct>=100?'#176b47':raishaPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">契約数</div>
+      <div class="summary-val">${total.keiyakuCount}</div>
+      <div class="summary-sub">成約率 ${total.seizyakuRate!=null?total.seizyakuRate+'%':'—'}</div>
+    </div>`;
+}
+
+function renderKPITablePeriod(customers,cases,logs,staffList,months){
+  const rateClass=(r)=>r==null?'rate-cell':r>=50?'rate-cell good':r>=30?'rate-cell warn':'rate-cell bad';
+  const rows=staffList.map(staff=>{
+    const k=calcKPIPeriod(customers,cases,logs,staff,months);
+    return `<tr>
+      <td class="left">${staff}</td>
+      <td>${k.hankyoCount}</td>
+      <td>${k.contactCount}</td>
+      <td class="${rateClass(k.conRate)}">${k.conRate!=null?k.conRate+'%':'—'}</td>
+      <td>${k.annaiCount}</td>
+      <td>${k.raishaCount}</td>
+      <td class="${rateClass(k.raishaRate)}">${k.raishaRate!=null?k.raishaRate+'%':'—'}</td>
+      <td>${k.reannaiCount}</td>
+      <td>${k.keiyakuCount}</td>
+      <td class="${rateClass(k.seizyakuRate)}">${k.seizyakuRate!=null?k.seizyakuRate+'%':'—'}</td>
+    </tr>`;
+  });
+  const total=calcKPIPeriod(customers,cases,logs,null,months);
+  rows.push(`<tr class="total-row">
+    <td class="left">合計</td>
+    <td>${total.hankyoCount}</td>
+    <td>${total.contactCount}</td>
+    <td class="${rateClass(total.conRate)}">${total.conRate!=null?total.conRate+'%':'—'}</td>
+    <td>${total.annaiCount}</td>
+    <td>${total.raishaCount}</td>
+    <td class="${rateClass(total.raishaRate)}">${total.raishaRate!=null?total.raishaRate+'%':'—'}</td>
+    <td>${total.reannaiCount}</td>
+    <td>${total.keiyakuCount}</td>
+    <td class="${rateClass(total.seizyakuRate)}">${total.seizyakuRate!=null?total.seizyakuRate+'%':'—'}</td>
+  </tr>`);
+  document.getElementById('kpi-tbody').innerHTML=rows.join('');
 }
 
 function renderSummary(customers,cases,logs,staffList,year,month){
