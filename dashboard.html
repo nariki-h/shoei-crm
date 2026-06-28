@@ -278,7 +278,7 @@ const TARGET_RAISHA=8;
 let msalApp=null, currentUser=null;
 let currentYear=new Date().getFullYear();
 let currentMonth=new Date().getMonth()+1;
-let currentYearDisplay=new Date().getFullYear();
+let currentYearDisplay=new Date().getMonth()+1>=4?new Date().getFullYear():new Date().getFullYear()-1;
 let currentMode='month'; // 'month' | 'range' | 'year'
 
 // MSAL
@@ -359,8 +359,8 @@ function updateMonthDisplay(){
 }
 
 function updateYearDisplay(){
-  document.getElementById('year-display').textContent=`${currentYearDisplay}年`;
-  document.getElementById('summary-title').textContent=`${currentYearDisplay}年 年間サマリー`;
+  document.getElementById('year-display').textContent=`${currentYearDisplay}年度（${currentYearDisplay}年4月〜${currentYearDisplay+1}年3月）`;
+  document.getElementById('summary-title').textContent=`${currentYearDisplay}年度 年間サマリー`;
 }
 
 function changeMonth(delta){
@@ -380,8 +380,14 @@ function changeYear(delta){
 // 表示対象の月リストを返す
 function getMonthRange(){
   if(currentMode==='year'){
-    // 1月〜12月
-    return Array.from({length:12},(_,i)=>({year:currentYearDisplay,month:i+1}));
+    // 4月〜翌3月（年度）
+    const months=[];
+    for(let i=0;i<12;i++){
+      const m=4+i;
+      if(m<=12) months.push({year:currentYearDisplay,month:m});
+      else months.push({year:currentYearDisplay+1,month:m-12});
+    }
+    return months;
   }
   if(currentMode==='range'){
     const fromVal=document.getElementById('date-from').value;
@@ -441,7 +447,7 @@ async function loadData(){
     if(currentMode==='year'||currentMode==='range'){
       // 年間・期間指定：期間合計サマリー＋月次推移
       document.getElementById('summary-title').textContent=
-        currentMode==='year'?`${currentYearDisplay}年 年間サマリー`
+        currentMode==='year'?`${currentYearDisplay}年度 年間サマリー`
         :`${months[0].year}年${months[0].month}月〜${months[months.length-1].year}年${months[months.length-1].month}月 サマリー`;
       renderSummaryPeriod(customers,cases,logs,staffList,months);
       renderKPITablePeriod(customers,cases,logs,staffList,months);
@@ -509,7 +515,7 @@ function calcKPI(customers, cases, logs, staff, year, month){
   });
 
   const conRate=hankyoCount>0?Math.round(contactCount/hankyoCount*100):null;
-  const raishaRate=contactCount>0?Math.round(raishaCount/contactCount*100):null;
+  const raishaRate=annaiCount>0?Math.round(raishaCount/annaiCount*100):null;
   const seizyakuRate=hankyoCount>0?Math.round(myContracts.length/hankyoCount*100):null;
 
   return {hankyoCount,contactCount,conRate,annaiCount,raishaCount,reannaiCount,keiyakuCount:myContracts.length,raishaRate,seizyakuRate};
@@ -551,7 +557,7 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
   });
 
   const conRate=hankyoCount>0?Math.round(contactCount/hankyoCount*100):null;
-  const raishaRate=contactCount>0?Math.round(raishaCount/contactCount*100):null;
+  const raishaRate=annaiCount>0?Math.round(raishaCount/annaiCount*100):null;
   const seizyakuRate=hankyoCount>0?Math.round(myContracts.length/hankyoCount*100):null;
   return {hankyoCount,contactCount,conRate,annaiCount,raishaCount,reannaiCount,keiyakuCount:myContracts.length,raishaRate,seizyakuRate};
 }
