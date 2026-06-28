@@ -271,6 +271,7 @@ const SITE_URL='https://shoeih.sharepoint.com/sites/Shoei-RealEstate';
 const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All','User.Read'];
 
 let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0;
+let currentRole="member", currentTeam="", currentStaffName="";
 
 async function initMSAL(){
   if(!window.msal){alert('MSALライブラリの読み込みに失敗しました。ページを再読み込みしてください。');return;}
@@ -302,6 +303,7 @@ async function onSignedIn(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='flex';
   const name=currentUser.name||currentUser.username;
+  currentStaffName=name;
   document.getElementById('user-name').textContent=name;
   document.getElementById('user-initials').textContent=name.slice(0,2);
   await loadCustomers();
@@ -316,9 +318,17 @@ async function spGetItems(list,filter=''){
 }
 
 async function getDigest(token){
-  const r=await fetch(`${SITE_URL}/_api/contextinfo`,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  const r=await fetch(`${SITE_URL}/_api/contextinfo`,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose'}});
+  if(!r.ok){
+    const txt=await r.text();
+    throw new Error('contextinfo HTTP '+r.status+': '+txt.slice(0,200));
+  }
   const d=await r.json();
-  return d.d.GetContextWebInformation.FormDigestValue;
+  const info=d?.d?.GetContextWebInformation;
+  if(!info?.FormDigestValue){
+    throw new Error('contextinfo レスポンス異常: '+JSON.stringify(d).slice(0,300));
+  }
+  return info.FormDigestValue;
 }
 
 const LIST_TYPES={
@@ -363,8 +373,15 @@ async function spUpdate(list,id,body){
 async function loadStaff(){
   try{
     const items=await spGetItems('担当者マスター');
+    window.STAFF_MAP={}; // 名前→{role,team}のマップ
+    items.forEach(i=>{
+      window.STAFF_MAP[i.Title]={role:i['OData__x5f79__x8077_']||'member',team:i['OData__x30c1__x30fc__x30e0_']||''};
+    });
     return items.map(i=>i.Title);
-  }catch(e){return ['金光善慶','馬場紘一','村上光南'];}
+  }catch(e){
+    window.STAFF_MAP={};
+    return ['金光善慶','馬場紘一','村上光南'];
+  }
 }
 
 async function loadCustomers(){
@@ -372,6 +389,10 @@ async function loadCustomers(){
   try{
     // 担当者マスター読み込み
     window.STAFF_LIST = await loadStaff();
+    // ログインユーザーのロール・チームを設定
+    const myInfo=window.STAFF_MAP?.[currentStaffName]||{role:'member',team:''};
+    currentRole=myInfo.role;
+    currentTeam=myInfo.team;
     const items=await spGetItems('顧客リスト');
     customers=items.map(i=>({
       id:i.ID,name:i.Title||'（未入力）',staff:i['OData__x62c5__x5f53__x8005_']||'',
@@ -434,7 +455,12 @@ function renderList(){
   const q=document.getElementById('search-input').value;
   const fp=document.getElementById('filter-phase').value;
   const fr=document.getElementById('filter-rank').value;
+  // 権限レベルによる顧客フィルタリング
+  const visibleStaff=currentRole==='admin'?null:
+    currentRole==='manager'?Object.keys(window.STAFF_MAP||{}).filter(n=>(window.STAFF_MAP[n].team===currentTeam)):
+    [currentStaffName];
   const f=customers.filter(c=>{
+    if(visibleStaff&&!visibleStaff.includes(c.staff)) return false;
     if(q&&!c.name.includes(q)&&!c.kana.includes(q)) return false;
     if(fp&&!c.cases.some(x=>x.phase===fp)) return false;
     if(fr&&c.rank!==fr) return false;
