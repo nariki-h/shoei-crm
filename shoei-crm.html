@@ -389,7 +389,11 @@ async function loadCustomers(){
       co_company:i['OData__x5171__x540c__x7533__x8fbc__x4e0']||'',
       co_age:i['OData__x5171__x540c__x7533__x8fbc__x4e1']||'',
       co_income:i['OData__x5171__x540c__x7533__x8fbc__x4e2']||'',
-      memo:i['OData__x5099__x8003_']||'',cases:[],logs:[]
+      memo:i['OData__x5099__x8003_']||'',
+      mediaDatetime:i['OData__x53cd__x97ff__x6642__x9593_']||'',
+      mediaSource:i['OData__x53cd__x97ff__x5a92__x4f53_']||'',
+      mediaPropName:i['OData__x53cd__x97ff__x7269__x4ef6_']||'',
+      cases:[],logs:[]
     }));
     const caseItems=await spGetItems('案件リスト');
     for(const c of customers){
@@ -486,6 +490,9 @@ function renderDetail(){
           <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${c.age}" onchange="cf(${c.id},'age',this.value)" type="number" min="0" max="100"/></div></div>
           <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${c.income}" onchange="cf(${c.id},'income',this.value)" type="number" min="0"/></div></div>
           <div class="field-item"><span class="fl">家族構成</span><div class="fv"><input value="${c.family}" onchange="cf(${c.id},'family',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">反響日時</span><div class="fv"><input value="${c.mediaDatetime}" readonly style="background:var(--bg);color:var(--text-sub);"/></div></div>
+          <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><input value="${c.mediaSource}" readonly style="background:var(--bg);color:var(--text-sub);"/></div></div>
+          <div class="field-item full"><span class="fl">反響物件</span><div class="fv"><input value="${c.mediaPropName}" readonly style="background:var(--bg);color:var(--text-sub);"/></div></div>
         </div>
       </div>
       <div class="sec-card">
