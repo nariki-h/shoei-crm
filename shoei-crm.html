@@ -82,14 +82,14 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   --success:#2d9e6b;--border:#e2e8f0;--text:#1a202c;
   --text-sub:#64748b;--text-muted:#94a3b8;--bg:#f7f9fc;--surface:#ffffff;
 }
-body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;height:100vh;overflow:hidden;}
-#login-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:var(--primary);}
-.login-card{background:var(--surface);border-radius:16px;padding:48px 40px;width:360px;text-align:center;}
+body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;height:100vh;height:100dvh;overflow:hidden;}
+#login-screen{display:flex;align-items:center;justify-content:center;height:100vh;height:100dvh;background:var(--primary);}
+.login-card{background:var(--surface);border-radius:16px;padding:48px 40px;width:min(360px,90vw);text-align:center;}
 .login-logo{font-size:22px;font-weight:700;color:var(--primary);margin-bottom:8px;}
 .login-sub{font-size:13px;color:var(--text-sub);margin-bottom:32px;}
 .login-btn{width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;}
 .login-btn:hover{background:#1a6dbf;}
-#app{display:none;height:100vh;flex-direction:column;}
+#app{display:none;height:100vh;height:100dvh;flex-direction:column;}
 .header{height:56px;background:var(--primary);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;}
 .header-logo{color:#fff;font-size:15px;font-weight:700;}
 .header-logo span{color:#7eb8f0;font-weight:400;}
@@ -190,6 +190,62 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .log-date{font-size:11px;color:var(--text-muted);}
 .log-staff{font-size:11px;color:var(--text-sub);margin-left:auto;}
 .log-memo{font-size:12px;color:var(--text);line-height:1.5;}
+
+/* 「一覧に戻る」ボタン（モバイル専用・PCでは非表示） */
+.back-btn{display:none;align-items:center;gap:4px;padding:8px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;}
+
+/* ===================================================================
+   レスポンシブ対応（スマホ・タブレット縦）  〜834px
+   PC・iPad横（835px以上）は従来の2ペインのまま変更なし
+   =================================================================== */
+@media (max-width: 834px){
+  /* iOSで入力時に画面が勝手に拡大するのを防ぐ（フォント16px以上） */
+  .fv input,.fv select,.fv textarea,
+  .sidebar-search input,.sidebar-filters select,
+  .log-form input[type=date],.log-form textarea,
+  #log-staff-select,.selector-trigger{font-size:16px !important;}
+
+  /* ヘッダーをコンパクトに */
+  .header{padding:0 12px;gap:8px;}
+  .header-logo span{display:none;}      /* 「リアルエステート CRM」を省略 */
+  .header-name{display:none;}           /* ユーザー名テキストを省略（アバターは残す） */
+  .header-btn .btn-text{display:none;}  /* ボタン文字を省略しアイコンのみに */
+  #logout-btn .btn-icon{display:inline !important;font-size:15px;}
+  .header-link{padding:7px 11px;font-size:15px;line-height:1;}
+
+  /* 本体：一覧 ⇄ 詳細 の1画面切り替え */
+  .sidebar{width:100%;border-right:none;}
+  .detail{display:none;}
+  .body.show-detail .sidebar{display:none;}
+  .body.show-detail .detail{display:flex;}
+
+  /* モバイル時のみ「戻る」ボタンを表示 */
+  .back-btn{display:inline-flex;}
+
+  /* フォーム：3列表示は1列に（2列はそのまま） */
+  .field-grid.three{grid-template-columns:1fr;}
+
+  /* 活動記録フォームの行を折り返し可能に */
+  .log-form-row{flex-wrap:wrap;}
+  .log-save-btn{padding:10px 18px;}
+
+  /* タップしやすいようにサイズを拡大 */
+  .cust-item{padding:14px;}
+  .log-quick{grid-template-columns:repeat(2,1fr);}
+  .log-quick-btn{padding:13px 6px;}
+  .act-btn{padding:9px 14px;}
+  .phase-opt{padding:13px 8px;}
+  .det-body{padding:12px;}
+  .det-head{padding:14px 12px;}
+
+  /* トーストを画面下中央に */
+  .toast{left:16px;right:16px;bottom:16px;text-align:center;}
+}
+
+/* さらに狭い端末（iPhone SE など）：2列フォームも1列に */
+@media (max-width: 400px){
+  .field-grid{grid-template-columns:1fr;}
+}
 </style>
 </head>
 <body>
@@ -211,9 +267,9 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
     <div class="header-spacer"></div>
     <div class="header-user">
       <div class="header-avatar" id="user-initials">--</div>
-      <span id="user-name">--</span>
-      <a href="https://nariki-h.github.io/shoei-crm/dashboard.html" style="padding:6px 12px;background:rgba(255,255,255,.1);color:#fff;border:none;border-radius:6px;font-size:12px;text-decoration:none;">📊 ダッシュボード</a>
-      <button class="header-btn" id="logout-btn">ログアウト</button>
+      <span id="user-name" class="header-name">--</span>
+      <a href="https://nariki-h.github.io/shoei-crm/dashboard.html" class="header-btn header-link" style="text-decoration:none;">📊<span class="btn-text"> ダッシュボード</span></a>
+      <button class="header-btn" id="logout-btn"><span class="btn-text">ログアウト</span><span class="btn-icon" aria-hidden="true" style="display:none;">⏻</span></button>
     </div>
   </div>
   <div class="body">
@@ -474,7 +530,8 @@ function renderList(){
     </div>`).join('');
 }
 
-function selectCustomer(id){selectedId=id;selectedCaseIdx=0;renderList();renderDetail();}
+function selectCustomer(id){selectedId=id;selectedCaseIdx=0;renderList();renderDetail();document.querySelector('.body')?.classList.add('show-detail');}
+function backToList(){document.querySelector('.body')?.classList.remove('show-detail');}
 
 function renderDetail(){
   const c=customers.find(x=>x.id===selectedId);
@@ -483,6 +540,7 @@ function renderDetail(){
   const ini=c.name.replace(/\s/g,'').slice(0,2);
   document.getElementById('detail').innerHTML=`
     <div class="det-head">
+      <button class="back-btn" onclick="backToList()">← 一覧に戻る</button>
       <div class="det-hero">
         <div class="det-avatar">${ini}</div>
         <div><div style="display:flex;align-items:center;gap:8px;"><span class="det-name">${c.name}</span><span class="rank-pill r${(c.rank||'d').toLowerCase()}">${c.rank}</span></div><div class="det-kana">${c.kana}</div></div>
@@ -717,6 +775,7 @@ async function deleteCustomer(id){
     customers=customers.filter(x=>x.id!==id);
     selectedId=null;
     document.getElementById('detail').innerHTML='<div class="detail-empty"><div style="font-size:40px;opacity:.3;">🏠</div><div>顧客を選択してください</div></div>';
+    document.querySelector('.body')?.classList.remove('show-detail');
     renderList();
     showToast('削除しました');
   }catch(e){showToast('削除エラー: '+e.message,true);}
