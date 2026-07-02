@@ -86,8 +86,8 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
 body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);font-size:14px;}
 
 /* Login */
-#login-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:#1a3a5c;}
-.login-card{background:#fff;border-radius:16px;padding:48px 40px;width:360px;text-align:center;}
+#login-screen{display:flex;align-items:center;justify-content:center;height:100vh;height:100dvh;background:#1a3a5c;}
+.login-card{background:#fff;border-radius:16px;padding:48px 40px;width:min(360px,90vw);text-align:center;}
 .login-logo{font-size:22px;font-weight:700;color:#1a3a5c;margin-bottom:8px;}
 .login-sub{font-size:13px;color:#6b7280;margin-bottom:32px;}
 .login-btn{width:100%;padding:12px;background:#2d7dd2;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;}
@@ -158,6 +158,48 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .ctrl-group{display:flex;align-items:center;gap:8px;}
 .date-input{padding:6px 10px;border:1px solid #d0d0d0;border-radius:6px;font-size:13px;background:#fff;color:#1a1a2e;cursor:pointer;}
 .date-input:focus{outline:none;border-color:#2d9e6b;}
+
+/* ===================================================================
+   レスポンシブ対応（スマホ・タブレット縦）  〜834px
+   広い表は横スクロールで全項目を維持。PC・iPad横は従来通り
+   =================================================================== */
+@media (max-width: 834px){
+  /* iOSで入力時に画面が勝手に拡大するのを防ぐ（16px以上） */
+  .range-select,.date-input,select,input{font-size:16px;}
+
+  /* ヘッダーをコンパクトに */
+  .header{padding:0 14px;gap:10px;}
+  .header-title{font-size:13px;}
+  #user-name{display:none;}            /* ユーザー名テキストを省略 */
+
+  /* コントロール行 */
+  .controls{padding:12px 14px;gap:8px;}
+  .refresh-btn{margin-left:0;}
+
+  /* メインの余白を圧縮して横幅を確保 */
+  .main{padding:16px 14px;gap:16px;}
+
+  /* サマリーカード：5列 → 2列 */
+  .summary-row{grid-template-columns:repeat(2,1fr);gap:10px;}
+  .summary-val{font-size:24px;}
+
+  /* 担当者別KPI表：横スクロール（列は潰さず全項目維持） */
+  .kpi-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .kpi-table{min-width:680px;}
+  .kpi-table th,.kpi-table td{padding:9px 10px;}
+
+  /* 月次推移表：横スクロール */
+  .trend-section{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .trend-table{min-width:560px;}
+
+  /* トーストを画面下中央に */
+  .toast{left:14px;right:14px;bottom:14px;text-align:center;}
+}
+
+/* 極小端末（iPhone SE など）：サマリーカードを1列に */
+@media (max-width: 380px){
+  .summary-row{grid-template-columns:1fr;}
+}
 </style>
 </head>
 <body>
