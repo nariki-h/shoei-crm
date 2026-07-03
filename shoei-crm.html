@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>翔栄リアルエステート CRM</title>
+<link rel="apple-touch-icon" href="https://nariki-h.github.io/shoei-crm/icon.png">
+<link rel="icon" type="image/png" href="https://nariki-h.github.io/shoei-crm/icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="翔栄CRM">
+<meta name="theme-color" content="#1a3a5c">
 <script>/*! @azure/msal-browser v2.38.3 2023-10-27 */
 "use strict";!function(e,t){"object"==typeof exports&&"undefined"!=typeof module?t(exports):"function"==typeof define&&define.amd?define(["exports"],t):t((e="undefined"!=typeof globalThis?globalThis:e||self).msal={})}(this,(function(e){
 /*! *****************************************************************************
@@ -101,7 +107,8 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .sidebar{width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
 .sidebar-search{padding:12px;}
 .sidebar-search input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--bg);outline:none;}
-.sidebar-filters{padding:0 12px 8px;display:flex;gap:6px;}
+.sidebar-filters{padding:0 12px 8px;display:flex;gap:6px;flex-wrap:wrap;}
+.sidebar-filters .selector-trigger{font-size:12px;padding:6px 8px;}
 .sidebar-filters select{flex:1;font-size:11px;padding:5px 4px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);outline:none;}
 .sidebar-list{flex:1;overflow-y:auto;}
 .sidebar-count{padding:6px 12px;font-size:11px;color:var(--text-muted);}
@@ -279,15 +286,18 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
         <input type="text" placeholder="氏名で検索" id="search-input"/>
       </div>
       <div class="sidebar-filters">
-        <select id="filter-phase">
-          <option value="">全フェーズ</option>
-          <option>問合せ</option><option>連絡済</option><option>案内</option>
-          <option>物件待ち</option><option>来社</option><option>申込</option>
-          <option>契約済</option><option>融資承認</option><option>決済済</option><option>終了</option>
-        </select>
-        <select id="filter-rank">
+        <div class="selector-wrap" style="flex:1 1 100%;">
+          <button class="selector-trigger" id="phase-filter-trigger" onclick="toggleDropdown('phase-filter-dd',event)">フェーズ</button>
+          <div class="selector-dropdown" id="phase-filter-dd">
+            <div class="selector-tags" id="phase-filter-tags"></div>
+          </div>
+        </div>
+        <select id="filter-rank" style="flex:1;">
           <option value="">全ランク</option>
           <option>S</option><option>A</option><option>B</option><option>C</option><option>D</option>
+        </select>
+        <select id="filter-staff" style="flex:1;">
+          <option value="">全担当者</option>
         </select>
       </div>
       <div class="sidebar-count" id="list-count">--</div>
@@ -329,6 +339,37 @@ const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All','User.Read'];
 
 let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0;
 let currentRole="member", currentTeam="", currentStaffName="";
+
+// フェーズ複数選択フィルタ（初期は完了系4フェーズを外す）
+const COMPLETED_PHASES=['契約済','融資承認','決済済','終了'];
+let selectedPhases=new Set(PHASES.filter(p=>!COMPLETED_PHASES.includes(p)));
+
+function renderPhaseFilterTags(){
+  const box=document.getElementById('phase-filter-tags');
+  if(!box)return;
+  box.innerHTML=PHASES.map(p=>`<span class="selector-tag${selectedPhases.has(p)?' selected':''}" onclick="togglePhaseFilter('${p}',event)">${p}</span>`).join('');
+  const t=document.getElementById('phase-filter-trigger');
+  if(t){
+    const n=selectedPhases.size;
+    t.textContent=(n===0||n===PHASES.length)?'フェーズ：すべて':'フェーズ（'+n+'）';
+  }
+}
+function togglePhaseFilter(p,e){
+  if(e)e.stopPropagation();
+  if(selectedPhases.has(p))selectedPhases.delete(p);else selectedPhases.add(p);
+  renderPhaseFilterTags();
+  renderList();
+}
+function renderStaffFilterOptions(){
+  const sel=document.getElementById('filter-staff');
+  if(!sel)return;
+  let names;
+  if(currentRole==='admin') names=(window.STAFF_LIST||[]);
+  else if(currentRole==='manager') names=Object.keys(window.STAFF_MAP||{}).filter(n=>window.STAFF_MAP[n].team===currentTeam);
+  else names=[currentStaffName];
+  const cur=sel.value;
+  sel.innerHTML='<option value="">全担当者</option>'+names.map(n=>`<option${cur===n?' selected':''}>${n}</option>`).join('');
+}
 
 function showLoginError(msg){
   const el=document.getElementById('login-error');
@@ -459,6 +500,7 @@ async function loadCustomers(){
     const myInfo=window.STAFF_MAP?.[currentStaffName]||{role:'member',team:''};
     currentRole=myInfo.role;
     currentTeam=myInfo.team;
+    renderStaffFilterOptions();
     const items=await spGetItems('顧客リスト');
     customers=items.map(i=>({
       id:i.ID,name:i.Title||'（未入力）',staff:i['OData__x62c5__x5f53__x8005_']||'',
@@ -519,16 +561,19 @@ async function loadCustomers(){
 
 function renderList(){
   const q=document.getElementById('search-input').value;
-  const fp=document.getElementById('filter-phase').value;
   const fr=document.getElementById('filter-rank').value;
+  const fs=document.getElementById('filter-staff')?.value||'';
   // 権限レベルによる顧客フィルタリング
   const visibleStaff=currentRole==='admin'?null:
     currentRole==='manager'?Object.keys(window.STAFF_MAP||{}).filter(n=>(window.STAFF_MAP[n].team===currentTeam)):
     [currentStaffName];
+  // フェーズ複数選択（全選択または未選択のときは絞り込みなし）
+  const usePhase=selectedPhases.size>0 && selectedPhases.size<PHASES.length;
   const f=customers.filter(c=>{
     if(visibleStaff&&!visibleStaff.includes(c.staff)) return false;
+    if(fs&&c.staff!==fs) return false;
     if(q&&!c.name.includes(q)&&!c.kana.includes(q)) return false;
-    if(fp&&!c.cases.some(x=>x.phase===fp)) return false;
+    if(usePhase&&!c.cases.some(x=>selectedPhases.has(x.phase))) return false;
     if(fr&&c.rank!==fr) return false;
     return true;
   });
@@ -903,8 +948,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('logout-btn').addEventListener('click',signOut);
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('search-input').addEventListener('input',renderList);
-  document.getElementById('filter-phase').addEventListener('change',renderList);
   document.getElementById('filter-rank').addEventListener('change',renderList);
+  document.getElementById('filter-staff').addEventListener('change',renderList);
+  renderPhaseFilterTags();
   document.getElementById('new-btn').addEventListener('click',newCustomer);
   await initMSAL();
 });
