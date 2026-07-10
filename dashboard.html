@@ -486,7 +486,7 @@ async function loadData(){
       spGetItems('担当者マスター')
     ]);
 
-    const staffList=staffItems.map(s=>s.Title).filter(Boolean);
+    const staffList=staffItems.map(s=>s.Title).filter(Boolean).filter(n=>!EXCLUDED_STAFF.has(n));
     if(staffList.length===0)staffList.push('金光善慶','馬場紘一','村上光南');
 
     const months=getMonthRange();
@@ -519,10 +519,16 @@ async function loadData(){
   hideLoading();
 }
 
+// 集計除外担当：CRM上は担当者として使うが、KPI集計・合計・推移には一切含めない。
+// 今後除外を増やす場合はこの配列に名前を足すだけでOK（顧客リスト側の表示には影響しない）。
+const EXCLUDED_STAFF=new Set(['CO事業部','その他']);
+// 担当者判定：staff指定時は完全一致、null（=全体集計）時は除外担当以外すべて。
+function ownerIncluded(owner,staff){return staff?owner===staff:!EXCLUDED_STAFF.has(owner);}
+
 function calcKPI(customers, cases, logs, staff, year, month){
   // 反響数：顧客の登録月×担当者
   const myCustomers=customers.filter(c=>{
-    const isStaff=!staff||(c['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const isStaff=ownerIncluded(c['OData__x62c5__x5f53__x8005_']||'',staff);
     const inM=inMonth(c.Created,year,month);
     return isStaff&&inM;
   });
@@ -534,7 +540,7 @@ function calcKPI(customers, cases, logs, staff, year, month){
   const raishaTypes=['来社','LP','オンライン'];
 
   const myLogs=logs.filter(l=>{
-    const isStaff=!staff||(l['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const isStaff=ownerIncluded(l['OData__x62c5__x5f53__x8005_']||'',staff);
     const inM=inMonth(l['OData__x65e5__x4ed8_'],year,month);
     return isStaff&&inM;
   });
@@ -556,7 +562,7 @@ function calcKPI(customers, cases, logs, staff, year, month){
     const custId=c['OData__x9867__x5ba2_ID'];
     const cust=customers.find(x=>String(x.ID)===custId);
     if(!cust)return false;
-    const isStaff=!staff||(cust['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const isStaff=ownerIncluded(cust['OData__x62c5__x5f53__x8005_']||'',staff);
     const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
     const inM=inMonth(c.Modified,year,month);
     return isStaff&&keiyakuPhases.includes(phase)&&inM;
@@ -577,13 +583,13 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
   const keiyakuPhases=['契約済','融資承認','決済済'];
 
   const myCustomers=customers.filter(c=>{
-    const isStaff=!staff||(c['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const isStaff=ownerIncluded(c['OData__x62c5__x5f53__x8005_']||'',staff);
     return isStaff&&inPeriod(c.Created,months);
   });
   const hankyoCount=myCustomers.length;
 
   const myLogs=logs.filter(l=>{
-    const isStaff=!staff||(l['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const isStaff=ownerIncluded(l['OData__x62c5__x5f53__x8005_']||'',staff);
     return isStaff&&inPeriod(l['OData__x65e5__x4ed8_'],months);
   });
 
@@ -599,7 +605,7 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
     const custId=c['OData__x9867__x5ba2_ID'];
     const cust=customers.find(x=>String(x.ID)===custId);
     if(!cust)return false;
-    const isStaff=!staff||(cust['OData__x62c5__x5f53__x8005_']||'')===(staff||'');
+    const isStaff=ownerIncluded(cust['OData__x62c5__x5f53__x8005_']||'',staff);
     const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
     return isStaff&&keiyakuPhases.includes(phase)&&inPeriod(c.Modified,months);
   });
