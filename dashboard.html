@@ -475,6 +475,12 @@ function inPeriod(dateStr,months){
   return months.some(({year,month})=>inMonth(dateStr,year,month));
 }
 
+// 反響日：CSV取込・自動取込で入る「反響時間」列を優先し、無ければ作成日にフォールバック。
+// これにより過去の反響もCSV取込日ではなく実際の反響月でKPI集計される。
+function hankyoDate(c){
+  return c['OData__x53cd__x97ff__x6642__x9593_'] || c.Created;
+}
+
 // データ読み込み・集計
 async function loadData(){
   showLoading('データを読み込み中...');
@@ -529,7 +535,7 @@ function calcKPI(customers, cases, logs, staff, year, month){
   // 反響数：顧客の登録月×担当者
   const myCustomers=customers.filter(c=>{
     const isStaff=ownerIncluded(c['OData__x62c5__x5f53__x8005_']||'',staff);
-    const inM=inMonth(c.Created,year,month);
+    const inM=inMonth(hankyoDate(c),year,month);
     return isStaff&&inM;
   });
   const hankyoCount=myCustomers.length;
@@ -584,7 +590,7 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
 
   const myCustomers=customers.filter(c=>{
     const isStaff=ownerIncluded(c['OData__x62c5__x5f53__x8005_']||'',staff);
-    return isStaff&&inPeriod(c.Created,months);
+    return isStaff&&inPeriod(hankyoDate(c),months);
   });
   const hankyoCount=myCustomers.length;
 
