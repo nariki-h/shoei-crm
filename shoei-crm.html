@@ -159,6 +159,34 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .phase-opt{padding:10px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;text-align:center;font-weight:500;background:var(--bg);}
 .phase-opt.selected{border-color:var(--accent);background:var(--accent);color:#fff;}
 .modal-cancel{width:100%;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text-sub);font-size:13px;cursor:pointer;}
+/* --- CSV一括取込 --- */
+.imp-open-btn{width:100%;margin-top:8px;padding:8px;background:var(--surface);color:var(--text-sub);border:1px dashed var(--border);border-radius:8px;font-size:12px;cursor:pointer;}
+.imp-open-btn:hover{border-color:var(--accent);color:var(--accent);}
+.imp-modal{max-width:640px;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.imp-file-input{width:100%;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);margin-bottom:12px;}
+.imp-controls{display:flex;flex-direction:column;gap:10px;margin-bottom:12px;}
+.imp-label{font-size:12px;color:var(--text-sub);display:flex;flex-direction:column;gap:4px;}
+.imp-select{padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);}
+.imp-check{font-size:12px;color:var(--text-sub);display:flex;align-items:center;gap:6px;cursor:pointer;}
+.imp-summary{font-size:12px;color:var(--text);background:var(--bg);border-radius:8px;padding:10px;margin-bottom:10px;line-height:1.5;}
+.imp-preview-wrap{max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;}
+.imp-preview-wrap:empty{display:none;}
+.imp-table{width:100%;border-collapse:collapse;font-size:11px;}
+.imp-table th{position:sticky;top:0;background:var(--bg);text-align:left;padding:6px 8px;color:var(--text-sub);border-bottom:1px solid var(--border);white-space:nowrap;}
+.imp-table td{padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;}
+.imp-table tr.imp-dup{opacity:.5;}
+.imp-badge{font-size:10px;padding:1px 6px;border-radius:10px;font-weight:600;}
+.imp-badge.ok{background:var(--accent-light);color:var(--accent);}
+.imp-badge.dup{background:#f1f5f9;color:var(--text-muted);}
+.imp-progress{margin-bottom:12px;}
+.imp-bar-track{height:8px;background:var(--border);border-radius:4px;overflow:hidden;}
+.imp-bar{height:100%;width:0;background:var(--accent);transition:width .2s;}
+.imp-ptext{font-size:12px;color:var(--text-sub);margin-top:6px;text-align:center;}
+.imp-actions{display:flex;gap:8px;}
+.imp-btn-test{flex:1;padding:10px;border:1px solid var(--accent);background:var(--surface);color:var(--accent);border-radius:8px;font-size:13px;cursor:pointer;}
+.imp-btn-run{flex:2;padding:10px;border:none;background:var(--accent);color:#fff;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;}
+.imp-btn-run:disabled,.imp-btn-test:disabled{opacity:.4;cursor:not-allowed;}
+@media(min-width:835px){.modal-overlay{align-items:center;} .imp-modal{border-radius:16px;}}
 .toast{position:fixed;bottom:24px;right:24px;background:var(--success);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;}
 .toast.show{opacity:1;}
 .loading{position:fixed;inset:0;background:rgba(255,255,255,.8);z-index:300;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-size:13px;color:var(--text-sub);}
@@ -304,6 +332,7 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
       <div class="sidebar-list" id="customer-list"></div>
       <div class="sidebar-add">
         <button class="add-btn" id="new-btn">＋ 新規顧客を追加</button>
+        <button class="imp-open-btn" id="import-btn" style="display:none;">📥 CSVから一括取込</button>
       </div>
     </div>
     <div class="detail" id="detail">
@@ -320,6 +349,30 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
     <div class="modal-title">フェーズを変更</div>
     <div class="phase-grid" id="phase-grid"></div>
     <button class="modal-cancel" id="modal-cancel">キャンセル</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="import-modal">
+  <div class="modal imp-modal">
+    <div class="modal-title">CSVから顧客を一括取込</div>
+    <input type="file" id="imp-file" class="imp-file-input" accept=".csv,text/csv" multiple>
+    <div class="imp-controls">
+      <label class="imp-label">担当者（取込分に一括で設定）
+        <select id="imp-staff" class="imp-select"></select>
+      </label>
+      <label class="imp-check"><input type="checkbox" id="imp-dedup" checked> 電話番号が既存顧客と重複する行はスキップ</label>
+    </div>
+    <div class="imp-summary" id="imp-summary">CSVファイルを選択してください</div>
+    <div class="imp-preview-wrap" id="imp-preview"></div>
+    <div class="imp-progress" id="imp-progress" style="display:none;">
+      <div class="imp-bar-track"><div class="imp-bar" id="imp-bar"></div></div>
+      <div class="imp-ptext" id="imp-ptext"></div>
+    </div>
+    <div class="imp-actions">
+      <button class="imp-btn-test" id="imp-test" disabled>先頭3件でテスト</button>
+      <button class="imp-btn-run" id="imp-run" disabled>全件取込</button>
+    </div>
+    <button class="modal-cancel" id="import-cancel">閉じる</button>
   </div>
 </div>
 
@@ -500,6 +553,7 @@ async function loadCustomers(){
     const myInfo=window.STAFF_MAP?.[currentStaffName]||{role:'member',team:''};
     currentRole=myInfo.role;
     currentTeam=myInfo.team;
+    document.getElementById('import-btn').style.display=(currentRole==='admin')?'block':'none';
     renderStaffFilterOptions();
     const items=await spGetItems('顧客リスト');
     customers=items.map(i=>({
@@ -943,6 +997,195 @@ async function saveLog(){
   hideLoading();
 }
 
+// ===== CSV一括取込 =====
+const CSV_FIELD_MAP={
+  '氏名':'Title',
+  'カナ':'OData__x30ab__x30ca_',
+  '電話番号':'OData__x96fb__x8a71__x756a__x53f7_',
+  'メールアドレス':'OData__x30e1__x30fc__x30eb__x30a2__x30',
+  '住所':'OData__x4f4f__x6240_',
+  '反響時間':'OData__x53cd__x97ff__x6642__x9593_',
+  '反響媒体':'OData__x53cd__x97ff__x5a92__x4f53_',
+  '反響物件':'OData__x53cd__x97ff__x7269__x4ef6_'
+};
+let importRows=[], importFileStats=[];
+
+function normalizePhone(s){return (s||'').replace(/[^0-9]/g,'');}
+function impEsc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function parseCSV(text){
+  text=text.replace(/^\uFEFF/,'');
+  const rows=[];let row=[];let cur='';let q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; }
+      else cur+=ch;
+    }else{
+      if(ch==='"')q=true;
+      else if(ch===','){row.push(cur);cur='';}
+      else if(ch==='\r'){/* skip */}
+      else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur='';}
+      else cur+=ch;
+    }
+  }
+  if(cur!==''||row.length){row.push(cur);rows.push(row);}
+  return rows.filter(r=>r.some(c=>c.trim()!==''));
+}
+
+function openImportModal(){
+  importRows=[];importFileStats=[];
+  document.getElementById('imp-file').value='';
+  document.getElementById('imp-file').disabled=false;
+  document.getElementById('imp-summary').innerHTML='CSVファイルを選択してください';
+  document.getElementById('imp-preview').innerHTML='';
+  document.getElementById('imp-progress').style.display='none';
+  document.getElementById('imp-bar').style.width='0%';
+  const sel=document.getElementById('imp-staff');
+  const names=(window.STAFF_LIST||[]);
+  sel.innerHTML='<option value="">選択してください</option>'+names.map(n=>`<option value="${impEsc(n)}">${impEsc(n)}</option>`).join('');
+  if(names.includes(currentStaffName))sel.value=currentStaffName;
+  document.getElementById('imp-dedup').checked=true;
+  document.getElementById('imp-run').disabled=true;
+  document.getElementById('imp-test').disabled=true;
+  document.getElementById('imp-run').textContent='全件取込';
+  document.getElementById('import-modal').classList.add('open');
+}
+function closeImportModal(){document.getElementById('import-modal').classList.remove('open');}
+
+async function handleImportFiles(files){
+  if(!files||!files.length)return;
+  importRows=[];importFileStats=[];
+  for(const file of files){
+    let text;
+    try{text=await file.text();}catch(e){continue;}
+    const rows=parseCSV(text);
+    if(!rows.length)continue;
+    const header=rows[0].map(h=>h.trim());
+    const idx={};header.forEach((h,i)=>{if(CSV_FIELD_MAP[h])idx[h]=i;});
+    const missing=Object.keys(CSV_FIELD_MAP).filter(h=>!(h in idx));
+    let n=0;
+    for(let r=1;r<rows.length;r++){
+      const rr=rows[r];
+      const get=h=>((idx[h]!=null?rr[idx[h]]:'')||'').trim();
+      const name=get('氏名');
+      if(!name)continue;
+      let kana=get('カナ');if(kana==='-')kana='';
+      const tel=get('電話番号');
+      const data={
+        Title:name,
+        'OData__x30ab__x30ca_':kana,
+        'OData__x96fb__x8a71__x756a__x53f7_':tel,
+        'OData__x30e1__x30fc__x30eb__x30a2__x30':get('メールアドレス'),
+        'OData__x4f4f__x6240_':get('住所'),
+        'OData__x53cd__x97ff__x6642__x9593_':get('反響時間'),
+        'OData__x53cd__x97ff__x5a92__x4f53_':get('反響媒体'),
+        'OData__x53cd__x97ff__x7269__x4ef6_':get('反響物件'),
+        'OData__x7a2e__x5225_':'個人',
+        'OData__x30e9__x30f3__x30af_':'C'
+      };
+      importRows.push({data,name,kana,tel,media:get('反響媒体'),normTel:normalizePhone(tel),dup:false});
+      n++;
+    }
+    importFileStats.push({name:file.name,count:n,missing});
+  }
+  buildImportPreview();
+}
+
+function buildImportPreview(){
+  const dedup=document.getElementById('imp-dedup').checked;
+  const existing=new Set((customers||[]).map(c=>normalizePhone(c.tel)).filter(Boolean));
+  const seen=new Set();
+  let dupCount=0;
+  importRows.forEach(r=>{
+    r.dup=false;
+    if(dedup&&r.normTel){
+      if(existing.has(r.normTel)||seen.has(r.normTel)){r.dup=true;dupCount++;}
+      else seen.add(r.normTel);
+    }
+  });
+  const total=importRows.length;
+  const target=total-(dedup?dupCount:0);
+  const fs=importFileStats.map(f=>`${impEsc(f.name)}: ${f.count}件`).join(' ／ ');
+  const warns=importFileStats.filter(f=>f.missing.length).map(f=>`⚠ ${impEsc(f.name)}: 未対応の列 ${f.missing.join('・')}`);
+  document.getElementById('imp-summary').innerHTML=
+    (total?`<div>読込: <b>${total}件</b>（${fs}）</div>`+
+      `<div style="margin-top:4px;">取込対象: <b style="color:var(--success)">${target}件</b>`+
+      (dedup?` ／ 重複スキップ: <b style="color:var(--text-muted)">${dupCount}件</b>`:'')+`</div>`
+      :'該当データがありませんでした')+
+    (warns.length?`<div style="margin-top:6px;color:#c2410c;font-size:11px;">${warns.join('<br>')}</div>`:'');
+  const rowsHtml=importRows.slice(0,12).map(r=>{
+    const badge=r.dup?`<span class="imp-badge dup">重複</span>`:`<span class="imp-badge ok">取込</span>`;
+    return `<tr class="${r.dup?'imp-dup':''}"><td>${badge}</td><td>${impEsc(r.name)}</td><td>${impEsc(r.kana)}</td><td>${impEsc(r.tel)}</td><td>${impEsc(r.media)}</td></tr>`;
+  }).join('');
+  document.getElementById('imp-preview').innerHTML=total?
+    `<table class="imp-table"><thead><tr><th></th><th>氏名</th><th>カナ</th><th>電話番号</th><th>反響媒体</th></tr></thead><tbody>${rowsHtml}</tbody></table>`+
+    (total>12?`<div style="font-size:11px;color:var(--text-muted);padding:6px 2px;">…ほか ${total-12}件</div>`:''):'';
+  const runBtn=document.getElementById('imp-run');
+  runBtn.disabled=target===0;
+  runBtn.textContent=`全件取込（${target}件）`;
+  document.getElementById('imp-test').disabled=target===0;
+}
+
+async function runImport(testOnly){
+  const staff=document.getElementById('imp-staff').value;
+  if(!staff){showToast('担当者を選択してください',true);return;}
+  const dedup=document.getElementById('imp-dedup').checked;
+  let targets=importRows.filter(r=>!(dedup&&r.dup));
+  if(testOnly)targets=targets.slice(0,3);
+  if(!targets.length){showToast('取込対象がありません',true);return;}
+  if(!testOnly&&!confirm(`${targets.length}件を「${staff}」担当で顧客リストに取り込みます。\nよろしいですか？`))return;
+
+  const prog=document.getElementById('imp-progress');
+  const bar=document.getElementById('imp-bar');
+  const ptext=document.getElementById('imp-ptext');
+  prog.style.display='block';bar.style.width='0%';
+  document.getElementById('imp-run').disabled=true;
+  document.getElementById('imp-test').disabled=true;
+  document.getElementById('imp-file').disabled=true;
+  let ok=0,fail=0;const errors=[];
+  let token=await getToken();
+  let digest=await getDigest(token);
+  const url=`${SITE_URL}/_api/web/lists/getbytitle('顧客リスト')/items`;
+  for(let i=0;i<targets.length;i++){
+    if(i>0&&i%200===0){token=await getToken();digest=await getDigest(token);}
+    const body=Object.assign({},targets[i].data,{'OData__x62c5__x5f53__x8005_':staff,__metadata:{type:'SP.Data.ListListItem'}});
+    let done=false,attempt=0;
+    while(!done&&attempt<4){
+      attempt++;
+      try{
+        const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':digest},body:JSON.stringify(body)});
+        if(r.status===429||r.status===503){
+          const wait=parseInt(r.headers.get('Retry-After')||'0',10)*1000||Math.min(2000*attempt,8000);
+          await new Promise(res=>setTimeout(res,wait));
+          continue;
+        }
+        if(!r.ok){const t=await r.text();throw new Error('HTTP '+r.status+' '+t.slice(0,120));}
+        ok++;done=true;
+      }catch(e){
+        if(attempt>=4){fail++;errors.push(targets[i].name+': '+e.message);done=true;}
+        else await new Promise(res=>setTimeout(res,800*attempt));
+      }
+    }
+    const pct=Math.round(((i+1)/targets.length)*100);
+    bar.style.width=pct+'%';
+    ptext.textContent=`取込中… ${i+1}/${targets.length}（成功 ${ok} ／ 失敗 ${fail}）`;
+    await new Promise(res=>setTimeout(res,60));
+  }
+  ptext.textContent=`完了: 成功 ${ok}件 ／ 失敗 ${fail}件`+(testOnly?'（テスト取込）':'');
+  if(errors.length)console.warn('取込エラー詳細:',errors);
+  showToast(`取込完了: 成功 ${ok}件${fail?` ／ 失敗 ${fail}件（詳細はコンソール）`:''}`,fail>0);
+  document.getElementById('imp-file').disabled=false;
+  await loadCustomers();
+  if(testOnly){
+    buildImportPreview();
+  }else if(fail===0){
+    setTimeout(closeImportModal,1200);
+  }else{
+    buildImportPreview();
+  }
+}
+
 document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('login-btn').addEventListener('click',signIn);
   document.getElementById('logout-btn').addEventListener('click',signOut);
@@ -952,6 +1195,12 @@ document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('filter-staff').addEventListener('change',renderList);
   renderPhaseFilterTags();
   document.getElementById('new-btn').addEventListener('click',newCustomer);
+  document.getElementById('import-btn').addEventListener('click',openImportModal);
+  document.getElementById('import-cancel').addEventListener('click',closeImportModal);
+  document.getElementById('imp-file').addEventListener('change',e=>handleImportFiles(e.target.files));
+  document.getElementById('imp-dedup').addEventListener('change',()=>buildImportPreview());
+  document.getElementById('imp-test').addEventListener('click',()=>runImport(true));
+  document.getElementById('imp-run').addEventListener('click',()=>runImport(false));
   await initMSAL();
 });
 </script>
