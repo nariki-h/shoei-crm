@@ -375,10 +375,17 @@ function onSignedIn(){
 // SharePoint
 async function spGetItems(list,filter=''){
   const token=await getToken();
-  const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items${filter?'?$filter='+encodeURIComponent(filter)+'&$top=2000':'?$top=2000'}`;
-  const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
-  const d=await r.json();
-  return d.d?.results||[];
+  // 1ページ2000件で取得し、__next を辿って全件取得（2000件超でも欠落しない）
+  let url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items${filter?'?$filter='+encodeURIComponent(filter)+'&$top=2000':'?$top=2000'}`;
+  let results=[];
+  while(url){
+    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+    if(!r.ok){const t=await r.text();throw new Error(`${list} 取得エラー HTTP ${r.status}: ${t.slice(0,150)}`);}
+    const d=await r.json();
+    results=results.concat(d.d?.results||[]);
+    url=d.d?.__next||null;
+  }
+  return results;
 }
 
 // モード切替
