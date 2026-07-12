@@ -481,10 +481,17 @@ async function onSignedIn(){
 
 async function spGetItems(list,filter=''){
   const token=await getToken();
-  const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items?$select=*${filter?'&$filter='+filter:'&$top=500'}`;
-  const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
-  const d=await r.json();
-  return d.d.results;
+  // 1ページ2000件で取得し、__next があれば辿って全件取得（500件上限で新規が欠ける問題への対処）
+  let url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items?$select=*&$top=2000${filter?'&$filter='+filter:''}`;
+  let results=[];
+  while(url){
+    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+    if(!r.ok){const t=await r.text();throw new Error(`${list} 取得エラー HTTP ${r.status}: ${t.slice(0,150)}`);}
+    const d=await r.json();
+    results=results.concat(d.d.results);
+    url=d.d.__next||null;
+  }
+  return results;
 }
 
 async function getDigest(token){
