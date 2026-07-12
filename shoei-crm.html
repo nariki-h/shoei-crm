@@ -336,9 +336,6 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
           <option value="name">氏名順（カナ）</option>
           <option value="rank">ランク高い順</option>
         </select>
-        <select id="filter-media" style="flex:1;">
-          <option value="">全媒体</option>
-        </select>
       </div>
       <div class="sidebar-count" id="list-count">--</div>
       <div class="sidebar-list" id="customer-list"></div>
@@ -435,19 +432,6 @@ function renderStaffFilterOptions(){
   else names=[currentStaffName];
   const cur=sel.value;
   sel.innerHTML='<option value="">全担当者</option>'+names.map(n=>`<option${cur===n?' selected':''}>${n}</option>`).join('');
-}
-
-// 反響媒体フィルタ：読み込んだ顧客データに実際に存在する媒体だけを選択肢にする
-function renderMediaFilterOptions(){
-  const sel=document.getElementById('filter-media');
-  if(!sel)return;
-  const cur=sel.value;
-  const set=new Set();
-  (customers||[]).forEach(c=>{const m=(c.mediaSource||'').trim();if(m)set.add(m);});
-  const list=[...set].sort((a,b)=>a.localeCompare(b,'ja'));
-  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-  const label=m=>m.length>26?m.slice(0,26)+'…':m;
-  sel.innerHTML='<option value="">全媒体</option>'+list.map(m=>`<option value="${esc(m)}"${cur===m?' selected':''}>${esc(label(m))}</option>`).join('');
 }
 
 function showLoginError(msg){
@@ -621,7 +605,6 @@ async function loadCustomers(){
       }));
       if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}];
     }
-    renderMediaFilterOptions();
     renderList();
     // 活動履歴読み込み
     const logItems=await spGetItems('活動履歴リスト');
@@ -644,7 +627,6 @@ function renderList(){
   const q=document.getElementById('search-input').value;
   const fr=document.getElementById('filter-rank').value;
   const fs=document.getElementById('filter-staff')?.value||'';
-  const fm=document.getElementById('filter-media')?.value||'';
   const sort=document.getElementById('sort-select')?.value||'';
   // 権限レベルによる顧客フィルタリング
   const visibleStaff=currentRole==='admin'?null:
@@ -656,7 +638,6 @@ function renderList(){
     if(visibleStaff&&!visibleStaff.includes(c.staff)) return false;
     if(fs&&c.staff!==fs) return false;
     if(q&&!c.name.includes(q)&&!c.kana.includes(q)&&!(c.address||'').includes(q)) return false;
-    if(fm&&c.mediaSource!==fm) return false;
     if(usePhase&&!c.cases.some(x=>selectedPhases.has(x.phase))) return false;
     if(fr&&c.rank!==fr) return false;
     return true;
@@ -728,8 +709,8 @@ function renderDetail(){
           <div class="field-item"><span class="fl">メール</span><div class="fv"><input value="${c.email}" onchange="cf(${c.id},'email',this.value)"/></div></div>
           <div class="field-item full"><span class="fl">住所</span><div class="fv"><input value="${c.address}" onchange="cf(${c.id},'address',this.value)"/></div></div>
           <div class="field-item"><span class="fl">勤め先</span><div class="fv"><input value="${c.company}" onchange="cf(${c.id},'company',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${c.age}" onchange="cf(${c.id},'age',this.value)" type="number" min="0" max="100"/></div></div>
-          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${c.income}" onchange="cf(${c.id},'income',this.value)" type="number" min="0"/></div></div>
+          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${(c.age||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'age',this.value)" placeholder="例：40 / 40代"/></div></div>
+          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${(c.income||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'income',this.value)" placeholder="例：600 / 500〜600"/></div></div>
           <div class="field-item"><span class="fl">家族構成</span><div class="fv"><input value="${c.family}" onchange="cf(${c.id},'family',this.value)"/></div></div>
           <div class="field-item"><span class="fl">反響日時</span><div class="fv"><input type="datetime-local" value="${toDTLocal(c.mediaDatetime)}" onchange="cf(${c.id},'mediaDatetime',fromDTLocal(this.value))"/></div></div>
           <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><input list="media-options" value="${(c.mediaSource||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'mediaSource',this.value)"/></div></div>
@@ -741,16 +722,8 @@ function renderDetail(){
         <div class="field-grid">
           <div class="field-item"><span class="fl">氏名</span><div class="fv"><input value="${c.co_name}" onchange="cf(${c.id},'co_name',this.value)"/></div></div>
           <div class="field-item"><span class="fl">勤め先</span><div class="fv"><input value="${c.co_company}" onchange="cf(${c.id},'co_company',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${c.co_age}" onchange="cf(${c.id},'co_age',this.value)" type="number" min="0" max="100"/></div></div>
-          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${c.co_income}" onchange="cf(${c.id},'co_income',this.value)" type="number" min="0"/></div></div>
-        </div>
-      </div>
-      <div class="sec-card">
-        <div class="sec-title">${cs.label} — 反響情報</div>
-        <div class="field-grid three">
-          <div class="field-item"><span class="fl">反響日</span><div class="fv"><input type="date" value="${cs.mediaDate}" onchange="csf('mediaDate',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><select onchange="csf('media',this.value)">${["","SUUMO","HOME'S","at home","自社HP","紹介","電話","メール","新聞折込","その他"].map(m=>`<option${cs.media===m?' selected':''}>${m}</option>`).join('')}</select></div></div>
-          <div class="field-item"><span class="fl">反響物件</span><div class="fv"><input value="${cs.mediaProp}" onchange="csf('mediaProp',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${(c.co_age||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'co_age',this.value)" placeholder="例：40 / 40代"/></div></div>
+          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${(c.co_income||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'co_income',this.value)" placeholder="例：600 / 500〜600"/></div></div>
         </div>
       </div>
       <div class="sec-card">
@@ -872,13 +845,13 @@ async function saveCustomer(){
       'OData__x53cd__x97ff__x5a92__x4f53_':c.mediaSource||null,
       'OData__x53cd__x97ff__x7269__x4ef6_':c.mediaPropName||null,
       'OData__x52e4__x3081__x5148_':c.company,
-      'OData__x5e74__x9f62_':c.age?parseInt(c.age):null,
-      'OData__x5e74__x53ce___x4e07__x5186_':c.income?parseInt(c.income):null,
+      'OData__x5e74__x9f62_':c.age||null,
+      'OData__x5e74__x53ce___x4e07__x5186_':c.income||null,
       'OData__x5bb6__x65cf__x69cb__x6210_':c.family,
       'OData__x5171__x540c__x7533__x8fbc__x4e':c.co_name,
       'OData__x5171__x540c__x7533__x8fbc__x4e0':c.co_company,
-      'OData__x5171__x540c__x7533__x8fbc__x4e1':c.co_age?parseInt(c.co_age):null,
-      'OData__x5171__x540c__x7533__x8fbc__x4e2':c.co_income?parseInt(c.co_income):null,
+      'OData__x5171__x540c__x7533__x8fbc__x4e1':c.co_age||null,
+      'OData__x5171__x540c__x7533__x8fbc__x4e2':c.co_income||null,
       'OData__x5099__x8003_':c.memo
     });
     for(const cs of c.cases){
@@ -1248,7 +1221,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('filter-rank').addEventListener('change',renderList);
   document.getElementById('filter-staff').addEventListener('change',renderList);
   document.getElementById('sort-select').addEventListener('change',renderList);
-  document.getElementById('filter-media').addEventListener('change',renderList);
   renderPhaseFilterTags();
   document.getElementById('new-btn').addEventListener('click',newCustomer);
   document.getElementById('import-btn').addEventListener('click',openImportModal);
