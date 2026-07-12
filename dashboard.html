@@ -538,6 +538,27 @@ const EXCLUDED_STAFF=new Set(['CO事業部','その他']);
 // 担当者判定：staff指定時は完全一致、null（=全体集計）時は除外担当以外すべて。
 function ownerIncluded(owner,staff){return staff?owner===staff:!EXCLUDED_STAFF.has(owner);}
 
+// 案件ごとの「初回接触」＝案内系（案内・再案内・来社・LP・オンライン）の最も古い活動を求める。
+// 初めて会った案件を、その初回接触の月だけで1回カウントするために使う。logs参照が変わるまでメモ化。
+let _fcCache={logs:null,map:null};
+function firstContactMap(logs){
+  if(_fcCache.logs===logs) return _fcCache.map;
+  const types=['案内','再案内','来社','LP','オンライン'];
+  const map=new Map(); // 案件ID -> {t, date, owner}
+  for(const l of logs){
+    if(!types.includes(l['OData__x7a2e__x5225_']||'')) continue;
+    const cid=l['OData__x6848__x4ef6_ID'];
+    const dstr=l['OData__x65e5__x4ed8_'];
+    if(!cid||!dstr) continue;
+    const t=new Date(dstr).getTime();
+    if(isNaN(t)) continue;
+    const cur=map.get(cid);
+    if(!cur||t<cur.t) map.set(cid,{t,date:dstr,owner:l['OData__x62c5__x5f53__x8005_']||''});
+  }
+  _fcCache={logs,map};
+  return map;
+}
+
 function calcKPI(customers, cases, logs, staff, year, month){
   // 反響数：顧客の登録月×担当者
   const myCustomers=customers.filter(c=>{
@@ -558,11 +579,9 @@ function calcKPI(customers, cases, logs, staff, year, month){
     return isStaff&&inM;
   });
 
-  // Contact：その月に初めて会った顧客数（案件IDごとにユニーク）
-  const contactedCaseIds=new Set(
-    myLogs.filter(l=>contactTypes.includes(l['OData__x7a2e__x5225_']||'')).map(l=>l['OData__x6848__x4ef6_ID'])
-  );
-  const contactCount=contactedCaseIds.size;
+  // Contact：案件ごとに「初回接触」の月で1回だけカウント（初めて会った案件のみ）
+  let contactCount=0;
+  firstContactMap(logs).forEach(fc=>{ if(ownerIncluded(fc.owner,staff)&&inMonth(fc.date,year,month)) contactCount++; });
 
   // 案内数・来社数・再案内数
   const annaiCount=myLogs.filter(l=>annaiTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
@@ -606,10 +625,9 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
     return isStaff&&inPeriod(l['OData__x65e5__x4ed8_'],months);
   });
 
-  const contactedCaseIds=new Set(
-    myLogs.filter(l=>contactTypes.includes(l['OData__x7a2e__x5225_']||'')).map(l=>l['OData__x6848__x4ef6_ID'])
-  );
-  const contactCount=contactedCaseIds.size;
+  // Contact：案件ごとに「初回接触」が期間内なら1回だけカウント（初めて会った案件のみ）
+  let contactCount=0;
+  firstContactMap(logs).forEach(fc=>{ if(ownerIncluded(fc.owner,staff)&&inPeriod(fc.date,months)) contactCount++; });
   const annaiCount=myLogs.filter(l=>annaiTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
   const raishaCount=myLogs.filter(l=>raishaTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
   const reannaiCount=myLogs.filter(l=>(l['OData__x7a2e__x5225_']||'')==='再案内').length;
