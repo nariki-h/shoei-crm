@@ -716,12 +716,12 @@ function renderDetail(){
           <div class="field-item"><span class="fl">メール</span><div class="fv"><input value="${c.email}" onchange="cf(${c.id},'email',this.value)"/></div></div>
           <div class="field-item full"><span class="fl">住所</span><div class="fv"><input value="${c.address}" onchange="cf(${c.id},'address',this.value)"/></div></div>
           <div class="field-item"><span class="fl">勤め先</span><div class="fv"><input value="${c.company}" onchange="cf(${c.id},'company',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${(c.age||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'age',this.value)" placeholder="例：40 / 40代"/></div></div>
-          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${(c.income||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'income',this.value)" placeholder="例：600 / 500〜600"/></div></div>
+          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${String(c.age??'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'age',this.value)" placeholder="例：40 / 40代"/></div></div>
+          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${String(c.income??'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'income',this.value)" placeholder="例：600 / 500〜600"/></div></div>
           <div class="field-item"><span class="fl">家族構成</span><div class="fv"><input value="${c.family}" onchange="cf(${c.id},'family',this.value)"/></div></div>
           <div class="field-item"><span class="fl">反響日時</span><div class="fv"><input type="datetime-local" value="${toDTLocal(c.mediaDatetime)}" onchange="cf(${c.id},'mediaDatetime',fromDTLocal(this.value))"/></div></div>
-          <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><input list="media-options" value="${(c.mediaSource||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'mediaSource',this.value)"/></div></div>
-          <div class="field-item full"><span class="fl">反響物件</span><div class="fv"><input value="${(c.mediaPropName||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'mediaPropName',this.value)"/></div></div>
+          <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><input list="media-options" value="${String(c.mediaSource??'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'mediaSource',this.value)"/></div></div>
+          <div class="field-item full"><span class="fl">反響物件</span><div class="fv"><input value="${String(c.mediaPropName??'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'mediaPropName',this.value)"/></div></div>
         </div>
       </div>
       <div class="sec-card">
@@ -729,8 +729,8 @@ function renderDetail(){
         <div class="field-grid">
           <div class="field-item"><span class="fl">氏名</span><div class="fv"><input value="${c.co_name}" onchange="cf(${c.id},'co_name',this.value)"/></div></div>
           <div class="field-item"><span class="fl">勤め先</span><div class="fv"><input value="${c.co_company}" onchange="cf(${c.id},'co_company',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${(c.co_age||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'co_age',this.value)" placeholder="例：40 / 40代"/></div></div>
-          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${(c.co_income||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'co_income',this.value)" placeholder="例：600 / 500〜600"/></div></div>
+          <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${String(c.co_age??'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'co_age',this.value)" placeholder="例：40 / 40代"/></div></div>
+          <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${String(c.co_income??'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'co_income',this.value)" placeholder="例：600 / 500〜600"/></div></div>
         </div>
       </div>
       <div class="sec-card">
