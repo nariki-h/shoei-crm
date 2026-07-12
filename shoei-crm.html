@@ -311,7 +311,7 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
   <div class="body">
     <div class="sidebar">
       <div class="sidebar-search">
-        <input type="text" placeholder="氏名で検索" id="search-input"/>
+        <input type="text" placeholder="氏名・カナ・住所で検索" id="search-input"/>
       </div>
       <div class="sidebar-filters">
         <div class="selector-wrap" style="flex:1 1 100%;">
@@ -326,6 +326,18 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
         </select>
         <select id="filter-staff" style="flex:1;">
           <option value="">全担当者</option>
+        </select>
+      </div>
+      <div class="sidebar-filters">
+        <select id="sort-select" style="flex:1;">
+          <option value="">標準（登録順）</option>
+          <option value="hankyo_new">反響が新しい順</option>
+          <option value="hankyo_old">反響が古い順</option>
+          <option value="name">氏名順（カナ）</option>
+          <option value="rank">ランク高い順</option>
+        </select>
+        <select id="filter-media" style="flex:1;">
+          <option value="">全媒体</option>
         </select>
       </div>
       <div class="sidebar-count" id="list-count">--</div>
@@ -344,6 +356,7 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
   </div>
 </div>
 
+<datalist id="media-options"><option value="SUUMO"></option><option value="HOME'S"></option><option value="at home"></option><option value="自社HP"></option><option value="紹介"></option><option value="電話"></option><option value="メール"></option><option value="新聞折込"></option><option value="その他"></option></datalist>
 <div class="modal-overlay" id="phase-modal">
   <div class="modal">
     <div class="modal-title">フェーズを変更</div>
@@ -422,6 +435,19 @@ function renderStaffFilterOptions(){
   else names=[currentStaffName];
   const cur=sel.value;
   sel.innerHTML='<option value="">全担当者</option>'+names.map(n=>`<option${cur===n?' selected':''}>${n}</option>`).join('');
+}
+
+// 反響媒体フィルタ：読み込んだ顧客データに実際に存在する媒体だけを選択肢にする
+function renderMediaFilterOptions(){
+  const sel=document.getElementById('filter-media');
+  if(!sel)return;
+  const cur=sel.value;
+  const set=new Set();
+  (customers||[]).forEach(c=>{const m=(c.mediaSource||'').trim();if(m)set.add(m);});
+  const list=[...set].sort((a,b)=>a.localeCompare(b,'ja'));
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const label=m=>m.length>26?m.slice(0,26)+'…':m;
+  sel.innerHTML='<option value="">全媒体</option>'+list.map(m=>`<option value="${esc(m)}"${cur===m?' selected':''}>${esc(label(m))}</option>`).join('');
 }
 
 function showLoginError(msg){
@@ -595,6 +621,7 @@ async function loadCustomers(){
       }));
       if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}];
     }
+    renderMediaFilterOptions();
     renderList();
     // 活動履歴読み込み
     const logItems=await spGetItems('活動履歴リスト');
@@ -617,6 +644,8 @@ function renderList(){
   const q=document.getElementById('search-input').value;
   const fr=document.getElementById('filter-rank').value;
   const fs=document.getElementById('filter-staff')?.value||'';
+  const fm=document.getElementById('filter-media')?.value||'';
+  const sort=document.getElementById('sort-select')?.value||'';
   // 権限レベルによる顧客フィルタリング
   const visibleStaff=currentRole==='admin'?null:
     currentRole==='manager'?Object.keys(window.STAFF_MAP||{}).filter(n=>(window.STAFF_MAP[n].team===currentTeam)):
@@ -626,11 +655,30 @@ function renderList(){
   const f=customers.filter(c=>{
     if(visibleStaff&&!visibleStaff.includes(c.staff)) return false;
     if(fs&&c.staff!==fs) return false;
-    if(q&&!c.name.includes(q)&&!c.kana.includes(q)) return false;
+    if(q&&!c.name.includes(q)&&!c.kana.includes(q)&&!(c.address||'').includes(q)) return false;
+    if(fm&&c.mediaSource!==fm) return false;
     if(usePhase&&!c.cases.some(x=>selectedPhases.has(x.phase))) return false;
     if(fr&&c.rank!==fr) return false;
     return true;
   });
+  // 並び替え（絞り込み後に適用）。空欄の反響日時は常に末尾へ。
+  if(sort){
+    const dnum=s=>{if(!s)return null;const t=new Date(s).getTime();return isNaN(t)?null:t;};
+    const rankOrder={S:0,A:1,B:2,C:3,D:4};
+    if(sort==='hankyo_new'||sort==='hankyo_old'){
+      f.sort((a,b)=>{
+        const da=dnum(a.mediaDatetime),db=dnum(b.mediaDatetime);
+        if(da===null&&db===null)return 0;
+        if(da===null)return 1;
+        if(db===null)return -1;
+        return sort==='hankyo_new'?db-da:da-db;
+      });
+    }else if(sort==='name'){
+      f.sort((a,b)=>(a.kana||a.name||'').localeCompare(b.kana||b.name||'','ja'));
+    }else if(sort==='rank'){
+      f.sort((a,b)=>(rankOrder[a.rank]??9)-(rankOrder[b.rank]??9));
+    }
+  }
   document.getElementById('list-count').textContent=f.length+'件';
   document.getElementById('customer-list').innerHTML=f.map(c=>`
     <div class="cust-item${c.id===selectedId?' active':''}" onclick="selectCustomer(${c.id})">
@@ -683,9 +731,9 @@ function renderDetail(){
           <div class="field-item"><span class="fl">年齢</span><div class="fv"><input value="${c.age}" onchange="cf(${c.id},'age',this.value)" type="number" min="0" max="100"/></div></div>
           <div class="field-item"><span class="fl">年収（万円）</span><div class="fv"><input value="${c.income}" onchange="cf(${c.id},'income',this.value)" type="number" min="0"/></div></div>
           <div class="field-item"><span class="fl">家族構成</span><div class="fv"><input value="${c.family}" onchange="cf(${c.id},'family',this.value)"/></div></div>
-          <div class="field-item"><span class="fl">反響日時</span><div class="fv"><input value="${c.mediaDatetime}" readonly style="background:var(--bg);color:var(--text-sub);"/></div></div>
-          <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><input value="${c.mediaSource}" readonly style="background:var(--bg);color:var(--text-sub);"/></div></div>
-          <div class="field-item full"><span class="fl">反響物件</span><div class="fv"><input value="${c.mediaPropName}" readonly style="background:var(--bg);color:var(--text-sub);"/></div></div>
+          <div class="field-item"><span class="fl">反響日時</span><div class="fv"><input type="datetime-local" value="${toDTLocal(c.mediaDatetime)}" onchange="cf(${c.id},'mediaDatetime',fromDTLocal(this.value))"/></div></div>
+          <div class="field-item"><span class="fl">反響媒体</span><div class="fv"><input list="media-options" value="${(c.mediaSource||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'mediaSource',this.value)"/></div></div>
+          <div class="field-item full"><span class="fl">反響物件</span><div class="fv"><input value="${(c.mediaPropName||'').replace(/"/g,'&quot;')}" onchange="cf(${c.id},'mediaPropName',this.value)"/></div></div>
         </div>
       </div>
       <div class="sec-card">
@@ -785,6 +833,9 @@ function renderDetail(){
 }
 
 function cf(id,k,v){const c=customers.find(x=>x.id===id);if(c)c[k]=v;}
+// 反響日時: 保存文字列 <-> datetime-local入力値 の相互変換（列はテキストなので保存は「YYYY/MM/DD HH:mm」で統一）
+function toDTLocal(s){if(!s)return '';const d=new Date(s);if(isNaN(d))return '';const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;}
+function fromDTLocal(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return v;const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;}
 function csf(k,v){const c=customers.find(x=>x.id===selectedId);if(c&&c.cases[selectedCaseIdx])c.cases[selectedCaseIdx][k]=v;}
 function switchCase(i){selectedCaseIdx=i;renderDetail();}
 function addCase(){
@@ -817,6 +868,9 @@ async function saveCustomer(){
       'OData__x96fb__x8a71__x756a__x53f7_':c.tel,
       'OData__x30e1__x30fc__x30eb__x30a2__x30':c.email,
       'OData__x4f4f__x6240_':c.address,
+      'OData__x53cd__x97ff__x6642__x9593_':c.mediaDatetime||null,
+      'OData__x53cd__x97ff__x5a92__x4f53_':c.mediaSource||null,
+      'OData__x53cd__x97ff__x7269__x4ef6_':c.mediaPropName||null,
       'OData__x52e4__x3081__x5148_':c.company,
       'OData__x5e74__x9f62_':c.age?parseInt(c.age):null,
       'OData__x5e74__x53ce___x4e07__x5186_':c.income?parseInt(c.income):null,
@@ -898,7 +952,7 @@ async function newCustomer(){
     console.log('spAdd response:', JSON.stringify(r));
     if(!r||!r.d||!r.d.ID){showToast('エラー: SharePointからの応答が不正です。コンソールを確認してください。',true);hideLoading();return;}
     const id=r.d.ID;
-    customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',memo:'',cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}],logs:[]});
+    customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',mediaDatetime:'',mediaSource:'',mediaPropName:'',memo:'',cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}],logs:[]});
     selectedId=id;selectedCaseIdx=0;renderList();renderDetail();
     showToast('新規顧客を作成しました');
   }catch(e){showToast('エラー: '+e.message,true);}
@@ -1193,6 +1247,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('search-input').addEventListener('input',renderList);
   document.getElementById('filter-rank').addEventListener('change',renderList);
   document.getElementById('filter-staff').addEventListener('change',renderList);
+  document.getElementById('sort-select').addEventListener('change',renderList);
+  document.getElementById('filter-media').addEventListener('change',renderList);
   renderPhaseFilterTags();
   document.getElementById('new-btn').addEventListener('click',newCustomer);
   document.getElementById('import-btn').addEventListener('click',openImportModal);
