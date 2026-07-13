@@ -608,9 +608,9 @@ async function loadCustomers(){
         walk:x['OData__x99c5__x8ddd__x96e2_']||'',
         landSize:x['OData__x5e0c__x671b__x571f__x5730__x97']||'',buildSize:x['OData__x5e0c__x671b__x5efa__x7269__x97']||'',budget:x['OData__x4e88__x7b97_']||'',
         timing:x['OData__x8cfc__x5165__x6642__x671f_']||'',media:x['OData__x53cd__x97ff__x5a92__x4f53_']||'',mediaProp:x['OData__x53cd__x97ff__x7269__x4ef6_']||'',
-        mediaDate:x['OData__x53cd__x97ff__x65e5_']?.slice(0,10)||'',memo:x['OData__x5e0c__x671b__x6761__x4ef6__x50']||''
+        mediaDate:x['OData__x53cd__x97ff__x65e5_']?.slice(0,10)||'',keiyakuDate:x['OData__x5951__x7d04__x65e5_']?.slice(0,10)||'',memo:x['OData__x5e0c__x671b__x6761__x4ef6__x50']||''
       }));
-      if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}];
+      if(c.cases.length===0) c.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',keiyakuDate:'',memo:''}];
     }
     renderList();
     // 活動履歴読み込み
@@ -697,6 +697,10 @@ function renderDetail(){
       <div class="phase-row">
         <span class="phase-label-sm">フェーズ</span>
         <div class="phase-badge" onclick="openModal()">${cs.phase} ▾</div>
+      </div>
+      <div class="phase-row">
+        <span class="phase-label-sm">契約日</span>
+        <input type="date" value="${cs.keiyakuDate||''}" onchange="csf('keiyakuDate',this.value)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);"/>
       </div>
     </div>
     <div class="det-tabs">
@@ -830,7 +834,16 @@ function openModal(){document.getElementById('phase-modal').classList.add('open'
 function closeModal(){document.getElementById('phase-modal').classList.remove('open');}
 function setPhase(p){
   const c=customers.find(x=>x.id===selectedId);
-  if(c&&c.cases[selectedCaseIdx])c.cases[selectedCaseIdx].phase=p;
+  const cs=c&&c.cases[selectedCaseIdx];
+  if(cs){
+    cs.phase=p;
+    // 契約系フェーズに変わった時点で契約日が未入力なら今日を自動記録（後から手修正可）
+    const keiyakuPhases=['契約済','融資承認','決済済'];
+    if(keiyakuPhases.includes(p)&&!cs.keiyakuDate){
+      const d=new Date();const pad=n=>String(n).padStart(2,'0');
+      cs.keiyakuDate=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    }
+  }
   closeModal();renderDetail();renderList();
 }
 
@@ -866,6 +879,7 @@ async function saveCustomer(){
         'OData__x9867__x5ba2_ID':String(c.id),
         'OData__x6848__x4ef6__x30e9__x30d9__x30':cs.label,
         'OData__x30d5__x30a7__x30fc__x30ba_':cs.phase,
+        'OData__x5951__x7d04__x65e5_':cs.keiyakuDate||null,
         'OData__x5e0c__x671b__x30a8__x30ea__x30':cs.area,
         'OData__x5e0c__x671b__x8def__x7dda_':cs.line,
         'OData__x5e0c__x671b__x99c5_':cs.station,
@@ -932,7 +946,7 @@ async function newCustomer(){
     console.log('spAdd response:', JSON.stringify(r));
     if(!r||!r.d||!r.d.ID){showToast('エラー: SharePointからの応答が不正です。コンソールを確認してください。',true);hideLoading();return;}
     const id=r.d.ID;
-    customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',mediaDatetime:'',mediaSource:'',mediaPropName:'',memo:'',cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',memo:''}],logs:[]});
+    customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',mediaDatetime:'',mediaSource:'',mediaPropName:'',memo:'',cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',timing:'',media:'',mediaProp:'',mediaDate:'',keiyakuDate:'',memo:''}],logs:[]});
     selectedId=id;selectedCaseIdx=0;renderList();renderDetail();
     showToast('新規顧客を作成しました');
   }catch(e){showToast('エラー: '+e.message,true);}
