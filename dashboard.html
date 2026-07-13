@@ -544,15 +544,19 @@ const EXCLUDED_STAFF=new Set(['CO事業部','その他']);
 // 担当者判定：staff指定時は完全一致、null（=全体集計）時は除外担当以外すべて。
 function ownerIncluded(owner,staff){return staff?owner===staff:!EXCLUDED_STAFF.has(owner);}
 
-// 案件ごとの「初回接触」＝案内系（案内・再案内・来社・LP・オンライン）の最も古い活動を求める。
+// 活動種別の共通セット。案内数はこれら全て+1、来社数は案内(のみ)を除いた集合が+1。
+// 「再案内」は今後は手入力しない（2回目以降を自動判定）が、既存の旧「再案内」ログを案内数から漏らさないためセットには残す。
+const ANNAI_TYPES=['案内','再案内','来社','LP','オンライン','その他'];
+const RAISHA_TYPES=['来社','LP','オンライン','その他'];
+
+// 案件ごとの「初回接触」＝案内系（ANNAI_TYPES）の最も古い活動を求める。
 // 初めて会った案件を、その初回接触の月だけで1回カウントするために使う。logs参照が変わるまでメモ化。
 let _fcCache={logs:null,map:null};
 function firstContactMap(logs){
   if(_fcCache.logs===logs) return _fcCache.map;
-  const types=['案内','再案内','来社','LP','オンライン'];
   const map=new Map(); // 案件ID -> {t, date, owner}
   for(const l of logs){
-    if(!types.includes(l['OData__x7a2e__x5225_']||'')) continue;
+    if(!ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')) continue;
     const cid=l['OData__x6848__x4ef6_ID'];
     const dstr=l['OData__x65e5__x4ed8_'];
     if(!cid||!dstr) continue;
@@ -565,6 +569,27 @@ function firstContactMap(logs){
   return map;
 }
 
+// 再案内＝同じ案件で2回目以降の案内系活動。該当する活動のIDセットを返す（案件ごとに日付昇順で2件目以降）。
+let _reCache={logs:null,set:null};
+function reannaiLogIds(logs){
+  if(_reCache.logs===logs) return _reCache.set;
+  const byCase=new Map(); // 案件ID -> [{id,t}]
+  for(const l of logs){
+    if(!ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')) continue;
+    const cid=l['OData__x6848__x4ef6_ID'];
+    const dstr=l['OData__x65e5__x4ed8_'];
+    if(!cid||!dstr) continue;
+    const t=new Date(dstr).getTime();
+    if(isNaN(t)) continue;
+    if(!byCase.has(cid)) byCase.set(cid,[]);
+    byCase.get(cid).push({id:l.ID,t});
+  }
+  const set=new Set();
+  byCase.forEach(arr=>{ arr.sort((a,b)=>a.t-b.t); for(let i=1;i<arr.length;i++) set.add(arr[i].id); });
+  _reCache={logs,set};
+  return set;
+}
+
 function calcKPI(customers, cases, logs, staff, year, month){
   // 反響数：顧客の登録月×担当者
   const myCustomers=customers.filter(c=>{
@@ -575,9 +600,6 @@ function calcKPI(customers, cases, logs, staff, year, month){
   const hankyoCount=myCustomers.length;
 
   // Contact数：活動履歴の日付月（案内以上の種別）
-  const contactTypes=['案内','再案内','来社','LP','オンライン'];
-  const annaiTypes=['案内','再案内','来社','LP','オンライン'];
-  const raishaTypes=['来社','LP','オンライン'];
 
   const myLogs=logs.filter(l=>{
     const isStaff=ownerIncluded(l['OData__x62c5__x5f53__x8005_']||'',staff);
@@ -589,10 +611,11 @@ function calcKPI(customers, cases, logs, staff, year, month){
   let contactCount=0;
   firstContactMap(logs).forEach(fc=>{ if(ownerIncluded(fc.owner,staff)&&inMonth(fc.date,year,month)) contactCount++; });
 
-  // 案内数・来社数・再案内数
-  const annaiCount=myLogs.filter(l=>annaiTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
-  const raishaCount=myLogs.filter(l=>raishaTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
-  const reannaiCount=myLogs.filter(l=>(l['OData__x7a2e__x5225_']||'')==='再案内').length;
+  // 案内数：ANNAI_TYPES全て+1／来社数：RAISHA_TYPES+1／再案内数：同案件2回目以降の案内系活動
+  const annaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const raishaCount=myLogs.filter(l=>RAISHA_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const reIds=reannaiLogIds(logs);
+  const reannaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')&&reIds.has(l.ID)).length;
 
   // 契約数：案件のフェーズが契約済以上の顧客（案件の更新月で判定→暫定的にフェーズで）
   const keiyakuPhases=['契約済','融資承認','決済済'];
@@ -615,9 +638,6 @@ function calcKPI(customers, cases, logs, staff, year, month){
 
 // 期間合計KPI（複数月をまとめて集計）
 function calcKPIPeriod(customers,cases,logs,staff,months){
-  const contactTypes=['案内','再案内','来社','LP','オンライン'];
-  const annaiTypes=['案内','再案内','来社','LP','オンライン'];
-  const raishaTypes=['来社','LP','オンライン'];
   const keiyakuPhases=['契約済','融資承認','決済済'];
 
   const myCustomers=customers.filter(c=>{
@@ -634,9 +654,10 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
   // Contact：案件ごとに「初回接触」が期間内なら1回だけカウント（初めて会った案件のみ）
   let contactCount=0;
   firstContactMap(logs).forEach(fc=>{ if(ownerIncluded(fc.owner,staff)&&inPeriod(fc.date,months)) contactCount++; });
-  const annaiCount=myLogs.filter(l=>annaiTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
-  const raishaCount=myLogs.filter(l=>raishaTypes.includes(l['OData__x7a2e__x5225_']||'')).length;
-  const reannaiCount=myLogs.filter(l=>(l['OData__x7a2e__x5225_']||'')==='再案内').length;
+  const annaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const raishaCount=myLogs.filter(l=>RAISHA_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const reIds=reannaiLogIds(logs);
+  const reannaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')&&reIds.has(l.ID)).length;
 
   const myContracts=cases.filter(c=>{
     const custId=c['OData__x9867__x5ba2_ID'];
