@@ -488,6 +488,12 @@ function hankyoDate(c){
   return c['OData__x53cd__x97ff__x6642__x9593_'] || c.Created;
 }
 
+// 契約日：CRMで入る「契約日」列を優先し、無ければ従来どおり案件の最終更新日にフォールバック。
+// これにより契約が「編集した月」ではなく実際の契約月で集計される。
+function keiyakuDate(c){
+  return c['OData__x5951__x7d04__x65e5_'] || c.Modified;
+}
+
 // データ読み込み・集計
 async function loadData(){
   showLoading('データを読み込み中...');
@@ -596,7 +602,7 @@ function calcKPI(customers, cases, logs, staff, year, month){
     if(!cust)return false;
     const isStaff=ownerIncluded(cust['OData__x62c5__x5f53__x8005_']||'',staff);
     const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
-    const inM=inMonth(c.Modified,year,month);
+    const inM=inMonth(keiyakuDate(c),year,month);
     return isStaff&&keiyakuPhases.includes(phase)&&inM;
   });
 
@@ -638,7 +644,7 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
     if(!cust)return false;
     const isStaff=ownerIncluded(cust['OData__x62c5__x5f53__x8005_']||'',staff);
     const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
-    return isStaff&&keiyakuPhases.includes(phase)&&inPeriod(c.Modified,months);
+    return isStaff&&keiyakuPhases.includes(phase)&&inPeriod(keiyakuDate(c),months);
   });
 
   const conRate=hankyoCount>0?Math.round(contactCount/hankyoCount*100):null;
