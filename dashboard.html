@@ -206,6 +206,30 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 @media (max-width: 380px){
   .summary-row{grid-template-columns:1fr;}
 }
+
+/* ===== タブ / 売上ページ ===== */
+.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:4px;}
+.tab{padding:10px 18px;font-size:13px;font-weight:700;color:var(--text2);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-family:inherit;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+.page{display:flex;flex-direction:column;gap:20px;}
+.uri-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.uri-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+.uri-card .lb{font-size:11px;color:var(--text3);font-weight:700;}
+.uri-card .vl{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:-.5px;}
+.uri-card .sb{font-size:11px;color:var(--text3);margin-top:2px;}
+.uri-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow-x:auto;}
+table.uri{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap;}
+table.uri th{background:var(--bg);color:var(--text2);font-size:11px;font-weight:700;padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);}
+table.uri th.left,table.uri td.left{text-align:left;}
+table.uri td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);}
+table.uri tbody tr:last-child td{border-bottom:none;}
+table.uri tbody tr:hover{background:var(--bg);}
+table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var(--border);}
+.uri-warn{background:var(--amber-light);border:1px solid #e8d5a3;color:var(--amber);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;}
+.uri-empty{background:var(--surface);border:1px dashed var(--border);border-radius:10px;padding:40px;text-align:center;color:var(--text3);font-size:13px;}
+.pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;background:var(--blue-light);color:var(--blue);}
+@media(max-width:760px){.uri-cards{grid-template-columns:repeat(2,1fr);}.tabs{padding:0 12px;}}
 </style>
 </head>
 <body>
@@ -230,6 +254,11 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
       <a class="crm-link" href="https://nariki-h.github.io/shoei-crm/shoei-crm.html">CRMへ</a>
       <button class="header-btn" id="logout-btn">ログアウト</button>
     </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-kpi" onclick="switchTab('kpi')">KPI</button>
+    <button class="tab" id="tab-uriage" onclick="switchTab('uriage')">売上（契約伝票）</button>
   </div>
 
   <div class="controls">
@@ -274,6 +303,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   </div>
 
   <div class="main">
+   <div id="page-kpi" class="page">
     <!-- 当月サマリー -->
     <div>
       <div class="section-title" id="summary-title">当月サマリー</div>
@@ -309,12 +339,49 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
       <div class="section-title">月次推移</div>
       <div id="trend-content"></div>
     </div>
+   </div><!-- /page-kpi -->
+
+   <!-- ===== 売上（契約伝票） ===== -->
+   <div id="page-uriage" class="page" style="display:none;">
+     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+       <div class="section-title" style="margin:0;">売上サマリー</div>
+       <span class="ctrl-label">集計基準</span>
+       <select class="range-select" id="uri-basis" onchange="renderUriage()">
+         <option value="keiyaku">契約日</option>
+         <option value="kessai">決済日</option>
+       </select>
+       <span style="font-size:11px;color:var(--text3);" id="uri-updated"></span>
+       <button class="refresh-btn" onclick="loadDenpyo()">🔄 伝票を再読込</button>
+     </div>
+
+     <div id="uri-warn-box"></div>
+     <div class="uri-cards" id="uri-cards"></div>
+
+     <div>
+       <div class="section-title">担当者別売上</div>
+       <div class="uri-table-wrap">
+         <table class="uri">
+           <thead><tr>
+             <th class="left">担当者</th><th>契約件数</th><th>売上計上金額</th><th>構成比</th><th>取引総額</th>
+           </tr></thead>
+           <tbody id="uri-staff-tbody"></tbody>
+           <tfoot id="uri-staff-tfoot"></tfoot>
+         </table>
+       </div>
+     </div>
+
+     <div>
+       <div class="section-title">契約明細</div>
+       <div id="uri-detail"></div>
+     </div>
+   </div><!-- /page-uriage -->
   </div>
 </div>
 
 <div class="loading" id="loading"><div class="spinner"></div><div id="loading-text">読み込み中...</div></div>
 <div class="toast" id="toast"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const CLIENT_ID='ebb78259-3e33-42c0-a391-25bedb2ca478';
 const TENANT_ID='c8bff07e-b699-4853-8c26-19be4a8759be';
@@ -507,6 +574,7 @@ async function loadData(){
 
     const staffList=staffItems.map(s=>s.Title).filter(Boolean).filter(n=>!EXCLUDED_STAFF.has(n));
     if(staffList.length===0)staffList.push('金光善慶','馬場紘一','村上光南');
+    staffListCache=staffList;
 
     const months=getMonthRange();
     const isMulti=months.length>1;
@@ -533,6 +601,7 @@ async function loadData(){
       }
     }
 
+    if(denpyoData) renderUriage();
     showToast('更新しました');
   }catch(e){showToast('エラー: '+e.message,true);}
   hideLoading();
@@ -840,6 +909,220 @@ function renderTrend(customers,cases,logs,staffList,months){
       <thead><tr><th class="left">指標</th>${headers}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+
+// ===================================================================
+// 売上（契約伝票）: SharePointの契約伝票フォルダを自動読み込み
+// ===================================================================
+// 伝票は「1契約=1ファイル」の帳票レイアウト。セル座標は固定前提。
+// 修正版が別名で複数届いても、№(AW2)ごとに更新日時が最新の1件だけを採用する。
+const DENPYO_FOLDER='/sites/Shoei-RealEstate/Shared Documents/契約伝票/2026年度';
+let denpyoData=null;      // 重複排除後のレコード配列
+let denpyoWarn=[];        // 画面に出す警告
+let staffListCache=[];    // 担当者マスターの氏名（loadDataで設定）
+
+// 伝票の担当者は姓のみ（例:「馬場」）。担当者マスターの氏名に前方一致で寄せる。
+// 対応表をハードコードせず、マスターが増えても自動追従させる狙い。
+function resolveStaff(sei){
+  if(!sei) return '(担当者未記入)';
+  const key=String(sei).replace(/[\s　]/g,'');
+  const hit=staffListCache.find(n=>String(n).replace(/[\s　]/g,'').startsWith(key));
+  return hit||String(sei).trim();
+}
+
+// フォルダ内のxlsxを列挙（日本語パスのため decodedurl 版を使用）
+async function spListFiles(folderPath){
+  const token=await getToken();
+  const url=`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${folderPath}')/Files`
+           +`?$select=Name,ServerRelativeUrl,TimeLastModified&$top=500`;
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=nometadata'}});
+  if(!r.ok){const t=await r.text();throw new Error(`フォルダ取得 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  const d=await r.json();
+  return (d.value||[]).filter(f=>/\.xlsx$/i.test(f.Name)&&!f.Name.startsWith('~$'));
+}
+
+async function spDownloadFile(serverRelativeUrl){
+  const token=await getToken();
+  const url=`${SITE_URL}/_api/web/GetFileByServerRelativePath(decodedurl='${serverRelativeUrl}')/$value`;
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+token}});
+  if(!r.ok) throw new Error(`ファイル取得 HTTP ${r.status}`);
+  return await r.arrayBuffer();
+}
+
+// 契約伝票1ファイルをパース（固定セル座標）
+function parseDenpyo(buf,fileName,updated){
+  const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:true});
+  const ws=wb.Sheets['契約伝票'];
+  if(!ws) return null;
+  const v=a=>(ws[a]&&ws[a].v!==undefined&&ws[a].v!=='')?ws[a].v:null;
+  const n=a=>{const x=v(a);return typeof x==='number'?x:(x?Number(String(x).replace(/,/g,''))||0:0);};
+  const d=a=>{const x=v(a);
+    if(x instanceof Date){const p=k=>String(k).padStart(2,'0');return `${x.getFullYear()}-${p(x.getMonth()+1)}-${p(x.getDate())}`;}
+    return x?String(x).slice(0,10):'';};
+
+  // 物件種別：チェックボックス(TRUE)の隣のラベルを採用
+  const TYPE_CELLS=[['I5','K5'],['I6','K6'],['U5','W5'],['U6','W6'],
+                    ['AG5','AI5'],['AG6','AI6'],['AS5','AU5'],['AS6','AU6']];
+  let bukken='';
+  for(const [flag,label] of TYPE_CELLS){ if(v(flag)===true){ bukken=v(label)||''; break; } }
+
+  // 歩合（営業/課長/部）
+  const commission=[];
+  for(let r=36;r<=38;r++){
+    if(v('D'+r))  commission.push({role:'営業',name:v('D'+r), rate:n('H'+r), amount:n('L'+r)});
+    if(v('T'+r))  commission.push({role:'課長',name:v('T'+r), rate:n('X'+r), amount:n('AB'+r)});
+    if(v('AJ'+r)) commission.push({role:'部',  name:v('AJ'+r),rate:n('AN'+r),amount:n('AR'+r)});
+  }
+
+  const sei=v('AQ3');
+  return {
+    no:v('AW2'), fileName, updated,
+    keiyakuDate:d('I3'), hikiwatashiDate:d('T3'), kessaiDate:d('AE3'),
+    seiName:sei, staff:resolveStaff(sei), kacho:v('BA3'),
+    taiyo:[v('I4'),v('T4')].filter(Boolean).join(' / '),
+    bukkenType:bukken,
+    shozai:v('I7')||'', jukyo:v('I8')||'',
+    urinushi:v('I14')||'', kainushi:v('I16')||'',
+    honntai:n('O21'), sougaku:n('O23'),
+    feeZei:n('AN31'), feeIn:n('AN32'), uriage:n('AP33'),
+    commission,
+    loanBank:v('Q41')||'', loanAmount:n('AT41'),
+    shouninDate:d('I42'), kaijoDate:d('W42'),
+    hankyoDate:d('AB43'), hankyoBaitai:v('AT43')||'',
+    hankyoBukken:[v('AB44'),v('AG44'),v('AL44')].filter(Boolean).join(' '),
+    hankyoPrice:n('AT44'),
+  };
+}
+
+// フォルダ全件読み込み → №で重複排除
+async function loadDenpyo(){
+  showLoading('契約伝票を読み込み中...');
+  denpyoWarn=[];
+  try{
+    const files=await spListFiles(DENPYO_FOLDER);
+    if(files.length===0){
+      denpyoData=[];
+      denpyoWarn.push('フォルダに .xlsx がありません（'+DENPYO_FOLDER+'）');
+      renderUriage(); hideLoading(); return;
+    }
+    const recs=[];
+    for(let i=0;i<files.length;i++){
+      const f=files[i];
+      showLoading(`契約伝票を読み込み中... (${i+1}/${files.length})`);
+      try{
+        const buf=await spDownloadFile(f.ServerRelativeUrl);
+        const rec=parseDenpyo(buf,f.Name,f.TimeLastModified);
+        if(rec) recs.push(rec);
+        else denpyoWarn.push(`${f.Name}：「契約伝票」シートが見つかりません`);
+      }catch(e){ denpyoWarn.push(`${f.Name}：${e.message}`); }
+    }
+
+    // №(AW2)ごとに更新日時が最新の1件だけ採用
+    const byNo=new Map(); let dup=0;
+    recs.forEach(r=>{
+      if(!r.no) denpyoWarn.push(`${r.fileName}：№(AW2)が未記入のため単独扱いにしました`);
+      const key=r.no||('【未記入】'+r.fileName);
+      const prev=byNo.get(key);
+      if(!prev){ byNo.set(key,r); return; }
+      dup++;
+      if(new Date(r.updated)>new Date(prev.updated)) byNo.set(key,r);
+    });
+    if(dup>0) denpyoWarn.unshift(`重複 ${dup} 件を除外しました（№ごとに更新日時が最新の1件のみ採用）`);
+
+    denpyoData=[...byNo.values()].sort((a,b)=>(b.keiyakuDate||'').localeCompare(a.keiyakuDate||''));
+    document.getElementById('uri-updated').textContent=
+      `${files.length}ファイル / ${denpyoData.length}契約　最終読込 ${new Date().toLocaleTimeString('ja-JP')}`;
+    renderUriage();
+    showToast(`契約伝票 ${denpyoData.length}件を読み込みました`);
+  }catch(e){
+    denpyoData=denpyoData||[];
+    denpyoWarn.push('読み込みエラー: '+e.message);
+    renderUriage();
+    showToast('エラー: '+e.message,true);
+  }
+  hideLoading();
+}
+
+const yen=v=>'¥'+Number(v||0).toLocaleString('ja-JP');
+const man=v=>Math.round(Number(v||0)/10000).toLocaleString('ja-JP')+'万';
+
+function renderUriage(){
+  const warnBox=document.getElementById('uri-warn-box');
+  warnBox.innerHTML=denpyoWarn.length
+    ? `<div class="uri-warn"><b>⚠️ 確認事項 ${denpyoWarn.length}件</b><br>${denpyoWarn.map(w=>'・'+w).join('<br>')}</div>`
+    : '';
+
+  if(!denpyoData){
+    document.getElementById('uri-cards').innerHTML='';
+    document.getElementById('uri-detail').innerHTML='<div class="uri-empty">「伝票を再読込」を押してください</div>';
+    document.getElementById('uri-staff-tbody').innerHTML='';
+    document.getElementById('uri-staff-tfoot').innerHTML='';
+    return;
+  }
+
+  const basis=document.getElementById('uri-basis').value;
+  const months=getMonthRange();
+  const rows=denpyoData.filter(r=>inPeriod(basis==='kessai'?r.kessaiDate:r.keiyakuDate,months));
+
+  // サマリーカード
+  const totUri=rows.reduce((a,r)=>a+r.uriage,0);
+  const totSou=rows.reduce((a,r)=>a+r.sougaku,0);
+  const avg=rows.length?Math.round(totUri/rows.length):0;
+  document.getElementById('uri-cards').innerHTML=`
+    <div class="uri-card"><div class="lb">契約件数</div><div class="vl">${rows.length}<span style="font-size:13px;font-weight:400;color:var(--text3)"> 件</span></div><div class="sb">${basis==='kessai'?'決済日':'契約日'}基準</div></div>
+    <div class="uri-card"><div class="lb">売上計上金額</div><div class="vl" style="color:var(--green)">${man(totUri)}</div><div class="sb">${yen(totUri)}</div></div>
+    <div class="uri-card"><div class="lb">取引総額</div><div class="vl">${man(totSou)}</div><div class="sb">${yen(totSou)}</div></div>
+    <div class="uri-card"><div class="lb">平均単価</div><div class="vl">${man(avg)}</div><div class="sb">1契約あたり</div></div>`;
+
+  // 担当者別
+  const by=new Map();
+  rows.forEach(r=>{
+    const k=r.staff;
+    if(!by.has(k)) by.set(k,{cnt:0,uri:0,sou:0});
+    const o=by.get(k); o.cnt++; o.uri+=r.uriage; o.sou+=r.sougaku;
+  });
+  const arr=[...by.entries()].sort((a,b)=>b[1].uri-a[1].uri);
+  document.getElementById('uri-staff-tbody').innerHTML=arr.length?arr.map(([k,o])=>`
+    <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td><td>${yen(o.uri)}</td>
+    <td>${totUri?Math.round(o.uri/totUri*100):0}%</td><td>${yen(o.sou)}</td></tr>`).join('')
+    :'<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>';
+  document.getElementById('uri-staff-tfoot').innerHTML=arr.length?
+    `<tr><td class="left">合計</td><td>${rows.length}</td><td>${yen(totUri)}</td><td>100%</td><td>${yen(totSou)}</td></tr>`:'';
+
+  // 明細
+  document.getElementById('uri-detail').innerHTML = rows.length? `
+    <div class="uri-table-wrap"><table class="uri">
+      <thead><tr>
+        <th class="left">№</th><th class="left">契約日</th><th class="left">決済日</th>
+        <th class="left">担当</th><th class="left">物件</th><th class="left">買主</th>
+        <th>総額</th><th>売上計上</th><th class="left">反響媒体</th><th class="left">ローン</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr>
+          <td class="left"><span class="pill">${r.no||'未記入'}</span></td>
+          <td class="left">${r.keiyakuDate||'-'}</td>
+          <td class="left">${r.kessaiDate||'-'}</td>
+          <td class="left">${r.staff}</td>
+          <td class="left" title="${(r.shozai||'').replace(/"/g,'')}">${r.jukyo||r.shozai||'-'}<br><span style="font-size:10px;color:var(--text3)">${r.bukkenType||''}</span></td>
+          <td class="left">${r.kainushi||'-'}</td>
+          <td>${yen(r.sougaku)}</td>
+          <td style="font-weight:700;color:var(--green)">${yen(r.uriage)}</td>
+          <td class="left">${r.hankyoBaitai||'-'}</td>
+          <td class="left">${r.loanBank||'-'}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`
+    : '<div class="uri-empty">この期間に該当する契約はありません</div>';
+}
+
+// タブ切替
+function switchTab(name){
+  const kpi=name==='kpi';
+  document.getElementById('tab-kpi').classList.toggle('active',kpi);
+  document.getElementById('tab-uriage').classList.toggle('active',!kpi);
+  document.getElementById('page-kpi').style.display=kpi?'flex':'none';
+  document.getElementById('page-uriage').style.display=kpi?'none':'flex';
+  if(!kpi&&denpyoData===null) loadDenpyo();
 }
 
 function showLoading(msg){document.getElementById('loading-text').textContent=msg;document.getElementById('loading').classList.add('show');}
