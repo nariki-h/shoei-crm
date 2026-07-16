@@ -917,7 +917,10 @@ function renderTrend(customers,cases,logs,staffList,months){
 // ===================================================================
 // 伝票は「1契約=1ファイル」の帳票レイアウト。セル座標は固定前提。
 // 修正版が別名で複数届いても、№(AW2)ごとに更新日時が最新の1件だけを採用する。
-const DENPYO_FOLDER='/sites/Shoei-RealEstate/Shared Documents/契約伝票/2026年度';
+// 契約伝票のルート。配下のサブフォルダ（受信箱/2025年度/2026年度…）を再帰的に全部読む。
+// フォルダ構成は「人が探すため」のものであり、集計の年度は伝票の契約日(I3)で判定する。
+// → 伝票をどこに置いても、後で移動しても、数字は一切変わらない。
+const DENPYO_ROOT='/sites/Shoei-RealEstate/Shared Documents/契約伝票';
 let denpyoData=null;      // 重複排除後のレコード配列
 let denpyoWarn=[];        // 画面に出す警告
 let staffListCache=[];    // 担当者マスターの氏名（loadDataで設定）
@@ -942,6 +945,30 @@ async function spListFiles(folderPath){
   return (d.value||[]).filter(f=>/\.xlsx$/i.test(f.Name)&&!f.Name.startsWith('~$'));
 }
 
+// フォルダ内のサブフォルダを列挙（Forms等の隠しフォルダは除外）
+async function spListFolders(folderPath){
+  const token=await getToken();
+  const url=`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${folderPath}')/Folders`
+           +`?$select=Name,ServerRelativeUrl&$top=500`;
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=nometadata'}});
+  if(!r.ok){const t=await r.text();throw new Error(`サブフォルダ取得 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  const d=await r.json();
+  return (d.value||[]).filter(f=>f.Name!=='Forms'&&!f.Name.startsWith('_vti'));
+}
+
+// 再帰スキャン：自分のxlsxを集め、サブフォルダがあれば中に入って同じことをする
+async function scanFolder(folderPath,depth){
+  depth=depth||0;
+  if(depth>5) return [];   // 想定外の深さで無限に潜らないための保険
+  const label=folderPath.split('/').pop();
+  const files=(await spListFiles(folderPath)).map(f=>({...f,folder:label}));
+  const subs=await spListFolders(folderPath);
+  for(const sub of subs){
+    files.push(...await scanFolder(sub.ServerRelativeUrl,depth+1));
+  }
+  return files;
+}
+
 async function spDownloadFile(serverRelativeUrl){
   const token=await getToken();
   const url=`${SITE_URL}/_api/web/GetFileByServerRelativePath(decodedurl='${serverRelativeUrl}')/$value`;
@@ -951,7 +978,7 @@ async function spDownloadFile(serverRelativeUrl){
 }
 
 // 契約伝票1ファイルをパース（固定セル座標）
-function parseDenpyo(buf,fileName,updated){
+function parseDenpyo(buf,fileName,updated,folder){
   const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:true});
   const ws=wb.Sheets['契約伝票'];
   if(!ws) return null;
@@ -977,7 +1004,7 @@ function parseDenpyo(buf,fileName,updated){
 
   const sei=v('AQ3');
   return {
-    no:v('AW2'), fileName, updated,
+    no:v('AW2'), fileName, updated, folder:folder||'',
     keiyakuDate:d('I3'), hikiwatashiDate:d('T3'), kessaiDate:d('AE3'),
     seiName:sei, staff:resolveStaff(sei), kacho:v('BA3'),
     taiyo:[v('I4'),v('T4')].filter(Boolean).join(' / '),
@@ -1000,10 +1027,11 @@ async function loadDenpyo(){
   showLoading('契約伝票を読み込み中...');
   denpyoWarn=[];
   try{
-    const files=await spListFiles(DENPYO_FOLDER);
+    showLoading('フォルダを検索中...');
+    const files=await scanFolder(DENPYO_ROOT);
     if(files.length===0){
       denpyoData=[];
-      denpyoWarn.push('フォルダに .xlsx がありません（'+DENPYO_FOLDER+'）');
+      denpyoWarn.push('契約伝票フォルダに .xlsx が1件もありません（'+DENPYO_ROOT+' 配下すべて）');
       renderUriage(); hideLoading(); return;
     }
     const recs=[];
@@ -1012,10 +1040,10 @@ async function loadDenpyo(){
       showLoading(`契約伝票を読み込み中... (${i+1}/${files.length})`);
       try{
         const buf=await spDownloadFile(f.ServerRelativeUrl);
-        const rec=parseDenpyo(buf,f.Name,f.TimeLastModified);
+        const rec=parseDenpyo(buf,f.Name,f.TimeLastModified,f.folder);
         if(rec) recs.push(rec);
-        else denpyoWarn.push(`${f.Name}：「契約伝票」シートが見つかりません`);
-      }catch(e){ denpyoWarn.push(`${f.Name}：${e.message}`); }
+        else denpyoWarn.push(`${f.folder}/${f.Name}：「契約伝票」シートが見つかりません`);
+      }catch(e){ denpyoWarn.push(`${f.folder}/${f.Name}：${e.message}`); }
     }
 
     // №(AW2)ごとに更新日時が最新の1件だけ採用
@@ -1031,8 +1059,11 @@ async function loadDenpyo(){
     if(dup>0) denpyoWarn.unshift(`重複 ${dup} 件を除外しました（№ごとに更新日時が最新の1件のみ採用）`);
 
     denpyoData=[...byNo.values()].sort((a,b)=>(b.keiyakuDate||'').localeCompare(a.keiyakuDate||''));
+    const inbox=denpyoData.filter(r=>r.folder==='受信箱').length;
     document.getElementById('uri-updated').textContent=
-      `${files.length}ファイル / ${denpyoData.length}契約　最終読込 ${new Date().toLocaleTimeString('ja-JP')}`;
+      `${files.length}ファイル / ${denpyoData.length}契約`
+      +(inbox?`　受信箱に未整理 ${inbox}件`:'')
+      +`　最終読込 ${new Date().toLocaleTimeString('ja-JP')}`;
     renderUriage();
     showToast(`契約伝票 ${denpyoData.length}件を読み込みました`);
   }catch(e){
@@ -1096,7 +1127,7 @@ function renderUriage(){
       <thead><tr>
         <th class="left">№</th><th class="left">契約日</th><th class="left">決済日</th>
         <th class="left">担当</th><th class="left">物件</th><th class="left">買主</th>
-        <th>総額</th><th>売上計上</th><th class="left">反響媒体</th><th class="left">ローン</th>
+        <th>総額</th><th>売上計上</th><th class="left">反響媒体</th><th class="left">ローン</th><th class="left">保管場所</th>
       </tr></thead>
       <tbody>${rows.map(r=>`
         <tr>
@@ -1110,6 +1141,7 @@ function renderUriage(){
           <td style="font-weight:700;color:var(--green)">${yen(r.uriage)}</td>
           <td class="left">${r.hankyoBaitai||'-'}</td>
           <td class="left">${r.loanBank||'-'}</td>
+          <td class="left"><span style="font-size:10px;color:${r.folder==='受信箱'?'var(--amber)':'var(--text3)'}">${r.folder||'-'}</span></td>
         </tr>`).join('')}</tbody>
     </table></div>`
     : '<div class="uri-empty">この期間に該当する契約はありません</div>';
