@@ -389,8 +389,16 @@ const CLIENT_ID='ebb78259-3e33-42c0-a391-25bedb2ca478';
 const TENANT_ID='c8bff07e-b699-4853-8c26-19be4a8759be';
 const SITE_URL='https://shoeih.sharepoint.com/sites/Shoei-RealEstate';
 const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All'];
-const TARGET_ANNAI=15;
-const TARGET_RAISHA=8;
+// 一人当たりの月次目標。全体目標は「この値 × 目標人数 × 月数」で自動計算される。
+const TARGET_ANNAI=15;   // 案内 15件/月/人
+const TARGET_RAISHA=8;   // 来社  8件/月/人
+
+// 目標の人数にカウントしない担当者（実績はKPI表・合計に載るが、目標の分母には入れない）。
+// EXCLUDED_STAFF（集計そのものから除外）とは別物なので注意。
+const TARGET_EXCLUDED_STAFF=new Set(['成木健介']);
+function targetHeadcount(staffList){
+  return Math.max(1,(staffList||[]).filter(s=>!TARGET_EXCLUDED_STAFF.has(s)).length);
+}
 
 let msalApp=null, currentUser=null;
 let currentYear=new Date().getFullYear();
@@ -604,7 +612,7 @@ async function loadData(){
     ]);
 
     const staffList=staffItems.map(s=>s.Title).filter(Boolean).filter(n=>!EXCLUDED_STAFF.has(n));
-    if(staffList.length===0)staffList.push('金光善慶','馬場紘一','村上光南');
+    if(staffList.length===0)staffList.push('金光善慶','馬場 宏一','村上光南','成木健介');
     staffListCache=staffList;
 
     const months=getMonthRange();
@@ -639,8 +647,16 @@ async function loadData(){
 // 集計除外担当：CRM上は担当者として使うが、KPI集計・合計・推移には一切含めない。
 // 今後除外を増やす場合はこの配列に名前を足すだけでOK（顧客リスト側の表示には影響しない）。
 const EXCLUDED_STAFF=new Set(['CO事業部','その他']);
-// 担当者判定：staff指定時は完全一致、null（=全体集計）時は除外担当以外すべて。
-function ownerIncluded(owner,staff){return staff?owner===staff:!EXCLUDED_STAFF.has(owner);}
+// 担当者判定：staff指定時は完全一致、null（=全体集計）時は「KPI表に行がある担当者」だけ。
+// 旧実装は !EXCLUDED_STAFF.has(owner) だったため、担当者が空欄の顧客や
+// 担当者マスターに存在しない名前まで合計に混入し、内訳の和と合計が食い違っていた。
+function ownerIncluded(owner,staff){
+  if(staff) return owner===staff;
+  if(!owner) return false;                      // 担当者が未割り当て → 対象外
+  if(EXCLUDED_STAFF.has(owner)) return false;   // CO事業部・その他 → 対象外
+  if(staffListCache && staffListCache.length) return staffListCache.includes(owner);
+  return true;
+}
 
 // 【将来のチーム分け用】担当者→チームの対応表。
 // 今は未使用。担当者マスターに「チーム」列を足してそこから読む形に差し替える予定。
@@ -813,8 +829,10 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
 
 function renderSummaryPeriod(customers,cases,logs,staffList,months){
   const total=calcKPIPeriod(customers,cases,logs,null,months);
-  const annaiTarget=TARGET_ANNAI*months.length;
-  const raishaTarget=TARGET_RAISHA*months.length;
+  // 目標は「一人当たり×人数×月数」。
+  const headcount=targetHeadcount(staffList);
+  const annaiTarget=TARGET_ANNAI*months.length*headcount;
+  const raishaTarget=TARGET_RAISHA*months.length*headcount;
   const annaiPct=Math.min(100,Math.round(total.annaiCount/annaiTarget*100));
   const raishaPct=Math.min(100,Math.round(total.raishaCount/raishaTarget*100));
   document.getElementById('summary-row').innerHTML=`
@@ -831,13 +849,13 @@ function renderSummaryPeriod(customers,cases,logs,staffList,months){
     <div class="summary-card">
       <div class="summary-label">案内数</div>
       <div class="summary-val ${total.annaiCount>=annaiTarget?'good':total.annaiCount>=annaiTarget*0.7?'warn':'bad'}">${total.annaiCount}</div>
-      <div class="summary-target">目標 ${annaiTarget}件</div>
+      <div class="summary-target">目標 ${annaiTarget}件（${TARGET_ANNAI}×${headcount}名×${months.length}ヶ月）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${annaiPct}%;background:${annaiPct>=100?'#176b47':annaiPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
       <div class="summary-label">来社数</div>
       <div class="summary-val ${total.raishaCount>=raishaTarget?'good':total.raishaCount>=raishaTarget*0.7?'warn':'bad'}">${total.raishaCount}</div>
-      <div class="summary-target">目標 ${raishaTarget}件</div>
+      <div class="summary-target">目標 ${raishaTarget}件（${TARGET_RAISHA}×${headcount}名×${months.length}ヶ月）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${raishaPct}%;background:${raishaPct>=100?'#176b47':raishaPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
@@ -882,8 +900,12 @@ function renderKPITablePeriod(customers,cases,logs,staffList,months){
 
 function renderSummary(customers,cases,logs,staffList,year,month){
   const total=calcKPI(customers,cases,logs,null,year,month);
-  const annaiPct=Math.min(100,Math.round(total.annaiCount/TARGET_ANNAI*100));
-  const raishaPct=Math.min(100,Math.round(total.raishaCount/TARGET_RAISHA*100));
+  // 目標は「一人当たり×人数」。TARGET_ANNAI/TARGET_RAISHA は一人当たり月次の値。
+  const headcount=targetHeadcount(staffList);
+  const annaiTarget=TARGET_ANNAI*headcount;
+  const raishaTarget=TARGET_RAISHA*headcount;
+  const annaiPct=Math.min(100,Math.round(total.annaiCount/annaiTarget*100));
+  const raishaPct=Math.min(100,Math.round(total.raishaCount/raishaTarget*100));
 
   document.getElementById('summary-row').innerHTML=`
     <div class="summary-card">
@@ -898,14 +920,14 @@ function renderSummary(customers,cases,logs,staffList,year,month){
     </div>
     <div class="summary-card">
       <div class="summary-label">案内数</div>
-      <div class="summary-val ${total.annaiCount>=TARGET_ANNAI?'good':total.annaiCount>=TARGET_ANNAI*0.7?'warn':'bad'}">${total.annaiCount}</div>
-      <div class="summary-target">目標 ${TARGET_ANNAI}件</div>
+      <div class="summary-val ${total.annaiCount>=annaiTarget?'good':total.annaiCount>=annaiTarget*0.7?'warn':'bad'}">${total.annaiCount}</div>
+      <div class="summary-target">目標 ${annaiTarget}件（${TARGET_ANNAI}×${headcount}名）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${annaiPct}%;background:${annaiPct>=100?'#176b47':annaiPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
       <div class="summary-label">来社数</div>
-      <div class="summary-val ${total.raishaCount>=TARGET_RAISHA?'good':total.raishaCount>=TARGET_RAISHA*0.7?'warn':'bad'}">${total.raishaCount}</div>
-      <div class="summary-target">目標 ${TARGET_RAISHA}件</div>
+      <div class="summary-val ${total.raishaCount>=raishaTarget?'good':total.raishaCount>=raishaTarget*0.7?'warn':'bad'}">${total.raishaCount}</div>
+      <div class="summary-target">目標 ${raishaTarget}件（${TARGET_RAISHA}×${headcount}名）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${raishaPct}%;background:${raishaPct>=100?'#176b47':raishaPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
