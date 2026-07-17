@@ -330,8 +330,8 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
       </div>
       <div class="sidebar-filters">
         <select id="sort-select" style="flex:1;">
+          <option value="hankyo_new" selected>反響が新しい順</option>
           <option value="">標準（登録順）</option>
-          <option value="hankyo_new">反響が新しい順</option>
           <option value="hankyo_old">反響が古い順</option>
           <option value="name">氏名順（カナ）</option>
           <option value="rank">ランク高い順</option>
@@ -752,7 +752,7 @@ function renderDetail(){
             <div class="log-form-row">
               <input type="date" id="log-date" value="${new Date().toISOString().slice(0,10)}"/>
               <select id="log-staff-select" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
-                ${(window.STAFF_LIST||[]).map(s=>`<option value="${s}">${s}</option>`).join('')}
+                ${(window.STAFF_LIST||[]).map(s=>`<option value="${s}"${s===(currentUser?.name||'')?' selected':''}>${s}</option>`).join('')}
               </select>
               <span id="log-type-label" style="font-size:12px;font-weight:700;color:var(--accent);"></span>
               <button class="log-save-btn" onclick="saveLog()">記録する</button>
