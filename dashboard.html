@@ -266,7 +266,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
     <select class="range-select" id="mode-select" onchange="onModeChange()">
       <option value="month">月別</option>
       <option value="range">期間指定</option>
-      <option value="year">年間</option>
+      <option value="year">年度</option>
     </select>
 
     <!-- 月別モード -->
@@ -276,11 +276,12 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
         <div class="month-display" id="month-display"></div>
         <button class="month-btn" onclick="changeMonth(1)">▶</button>
       </div>
-      <select class="range-select" id="range-select" onchange="loadData()">
-        <option value="1">当月のみ</option>
-        <option value="3">過去3ヶ月</option>
-        <option value="6">過去6ヶ月</option>
+      <select class="range-select" id="range-select" onchange="onRangeChange()">
+        <option value="month">当月のみ</option>
+        <option value="quarter">本四半期</option>
+        <option value="half">本半期</option>
       </select>
+      <span class="ctrl-label" id="range-note" style="color:var(--text2);white-space:nowrap;"></span>
     </div>
 
     <!-- 期間指定モード -->
@@ -308,6 +309,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
     <div>
       <div class="section-title" id="summary-title">当月サマリー</div>
       <div class="summary-row" id="summary-row"></div>
+      <div id="hankyo-breakdown"></div>
     </div>
 
     <!-- 担当者別KPI -->
@@ -477,12 +479,16 @@ function onModeChange(){
 // 月表示
 function updateMonthDisplay(){
   document.getElementById('month-display').textContent=`${currentYear}年${currentMonth}月`;
-  document.getElementById('summary-title').textContent=`${currentYear}年${currentMonth}月 サマリー`;
+  const lb=periodLabel();
+  document.getElementById('summary-title').textContent=`${lb} サマリー`;
+  // ◀▶で選んだ月と、実際に集計している期間がズレて見えないよう明示する
+  const note=document.getElementById('range-note');
+  if(note) note.textContent=document.getElementById('range-select').value==='month'?'':'集計対象 '+lb;
 }
 
 function updateYearDisplay(){
   document.getElementById('year-display').textContent=`${currentYearDisplay}年度（${currentYearDisplay}年4月〜${currentYearDisplay+1}年3月）`;
-  document.getElementById('summary-title').textContent=`${currentYearDisplay}年度 年間サマリー`;
+  document.getElementById('summary-title').textContent=`${currentYearDisplay}年度 サマリー`;
 }
 
 function changeMonth(delta){
@@ -526,17 +532,42 @@ function getMonthRange(){
     }
     return months;
   }
-  // 月別モード
-  const range=parseInt(document.getElementById('range-select').value);
+  // 月別モード：当月のみ / 本四半期 / 本半期（すべて年度=4月開始で判定）
+  // 「選択月を終点に遡る」旧仕様をやめ、選択月が属する四半期・半期をまるごと返す。
+  // これでKPIタブと売上タブの母数が必ず一致する。
+  const range=document.getElementById('range-select').value;
+  if(range==='month') return [{year:currentYear,month:currentMonth}];
+  const fy=fyYear(currentYear,currentMonth);
+  const idx=fyIndex(currentMonth);
+  const len=range==='quarter'?3:6;
+  const start=Math.floor(idx/len)*len;
   const months=[];
-  for(let i=range-1;i>=0;i--){
-    let m=currentMonth-i;
-    let y=currentYear;
-    while(m<1){m+=12;y--;}
-    months.push({year:y,month:m});
-  }
+  for(let i=start;i<start+len;i++) months.push(fyMonth(fy,i));
   return months;
 }
+
+// ---- 年度（4月開始）ヘルパー -------------------------------------------
+// fyIndex: 4月=0, 5月=1 ... 12月=8, 1月=9, 2月=10, 3月=11
+function fyIndex(month){return (month+8)%12;}
+// fyYear: その年月が属する年度（1〜3月は前年の年度）
+function fyYear(year,month){return month>=4?year:year-1;}
+// fyMonth: 年度fyのi番目(0-11)の {year,month}
+function fyMonth(fy,i){return {year:fy+(i<=8?0:1),month:((i+3)%12)+1};}
+
+// 月別モードで実際に集計している期間の表示ラベル
+function periodLabel(){
+  const range=document.getElementById('range-select').value;
+  if(range==='month') return `${currentYear}年${currentMonth}月`;
+  const fy=fyYear(currentYear,currentMonth);
+  const idx=fyIndex(currentMonth);
+  const ms=getMonthRange();
+  const a=ms[0], b=ms[ms.length-1];
+  const span=`${a.year}年${a.month}月〜${b.year}年${b.month}月`;
+  if(range==='quarter') return `${fy}年度 Q${Math.floor(idx/3)+1}（${span}）`;
+  return `${fy}年度 ${idx<6?'上期':'下期'}（${span}）`;
+}
+
+function onRangeChange(){updateMonthDisplay();loadData();}
 
 function inMonth(dateStr,year,month){
   if(!dateStr)return false;
@@ -577,29 +608,27 @@ async function loadData(){
     staffListCache=staffList;
 
     const months=getMonthRange();
-    const isMulti=months.length>1;
 
-    if(currentMode==='year'||currentMode==='range'){
-      // 年間・期間指定：期間合計サマリー＋月次推移
-      document.getElementById('summary-title').textContent=
-        currentMode==='year'?`${currentYearDisplay}年度 年間サマリー`
-        :`${months[0].year}年${months[0].month}月〜${months[months.length-1].year}年${months[months.length-1].month}月 サマリー`;
+    document.getElementById('summary-title').textContent=
+      currentMode==='year'?`${currentYearDisplay}年度 サマリー`
+      :currentMode==='range'?`${months[0].year}年${months[0].month}月〜${months[months.length-1].year}年${months[months.length-1].month}月 サマリー`
+      :`${periodLabel()} サマリー`;
+
+    // モードで分けず「1ヶ月なら単月集計／2ヶ月以上なら期間合計＋推移」で統一。
+    // 旧実装は月別モードのとき期間が複数月でもKPIを最終月だけで出していたため、
+    // 売上タブ（getMonthRange準拠）と母数が食い違っていた。ここを揃えるのが本修正の要点。
+    if(months.length>1){
       renderSummaryPeriod(customers,cases,logs,staffList,months);
       renderKPITablePeriod(customers,cases,logs,staffList,months);
       renderTrend(customers,cases,logs,staffList,months);
       document.getElementById('trend-section').style.display='block';
     } else {
-      // 月別モード（従来通り）
-      const {year:cy,month:cm}=months[months.length-1];
+      const {year:cy,month:cm}=months[0];
       renderSummary(customers,cases,logs,staffList,cy,cm);
       renderKPITable(customers,cases,logs,staffList,cy,cm);
-      if(isMulti){
-        renderTrend(customers,cases,logs,staffList,months);
-        document.getElementById('trend-section').style.display='block';
-      }else{
-        document.getElementById('trend-section').style.display='none';
-      }
+      document.getElementById('trend-section').style.display='none';
     }
+    renderHankyoBreakdown(customers,months);
 
     if(denpyoData) renderUriage();
     showToast('更新しました');
@@ -612,6 +641,45 @@ async function loadData(){
 const EXCLUDED_STAFF=new Set(['CO事業部','その他']);
 // 担当者判定：staff指定時は完全一致、null（=全体集計）時は除外担当以外すべて。
 function ownerIncluded(owner,staff){return staff?owner===staff:!EXCLUDED_STAFF.has(owner);}
+
+// 【将来のチーム分け用】担当者→チームの対応表。
+// 今は未使用。担当者マスターに「チーム」列を足してそこから読む形に差し替える予定。
+const TEAM_MAP={};
+
+// 反響の内訳：流入総数／仲介事業部（=KPI母数）／対象外(CO事業部・その他)の内訳。
+// includedは ownerIncluded(owner,null) と同じ判定なので、KPI表の合計行の反響数と必ず一致する。
+function calcHankyoBreakdown(customers,months){
+  let total=0, included=0;
+  const ex=new Map();
+  for(const c of customers){
+    if(!inPeriod(hankyoDate(c),months)) continue;
+    total++;
+    const owner=c['OData__x62c5__x5f53__x8005_']||'';
+    if(ownerIncluded(owner,null)) included++;
+    else ex.set(owner,(ex.get(owner)||0)+1);
+  }
+  return {total,included,ex};
+}
+
+function renderHankyoBreakdown(customers,months){
+  const el=document.getElementById('hankyo-breakdown');
+  if(!el) return;
+  const bd=calcHankyoBreakdown(customers,months);
+  const exList=[...bd.ex.entries()].sort((a,b)=>b[1]-a[1]);
+  const exTotal=bd.total-bd.included;
+  el.innerHTML=`
+    <div style="margin-top:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;
+                padding:11px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:7px 14px;font-size:13px;">
+      <span style="font-weight:700;">反響 内訳</span>
+      <span style="color:var(--text2);">流入総数 <b style="color:var(--text);font-size:16px;">${bd.total}</b> 件</span>
+      <span style="color:var(--text3);">＝</span>
+      <span style="background:var(--blue-light);color:var(--blue);padding:3px 11px;border-radius:999px;font-weight:700;">仲介事業部 ${bd.included}件</span>
+      <span style="color:var(--text3);">＋</span>
+      <span style="background:var(--bg);color:var(--text2);padding:3px 11px;border-radius:999px;">対象外 ${exTotal}件${
+        exList.length?'（'+exList.map(([k,v])=>(k||'(未設定)')+' '+v).join(' / ')+'）':''}</span>
+      <span style="color:var(--text3);font-size:11px;">※Con率・成約率などの母数は「仲介事業部」のみ</span>
+    </div>`;
+}
 
 // 活動種別の共通セット。案内数はこれら全て+1、来社数は案内(のみ)を除いた集合が+1。
 // 「再案内」は今後は手入力しない（2回目以降を自動判定）が、既存の旧「再案内」ログを案内数から漏らさないためセットには残す。
@@ -751,7 +819,7 @@ function renderSummaryPeriod(customers,cases,logs,staffList,months){
   const raishaPct=Math.min(100,Math.round(total.raishaCount/raishaTarget*100));
   document.getElementById('summary-row').innerHTML=`
     <div class="summary-card">
-      <div class="summary-label">反響数</div>
+      <div class="summary-label">反響数（仲介事業部）</div>
       <div class="summary-val">${total.hankyoCount}</div>
       <div class="summary-sub">${months.length}ヶ月合計</div>
     </div>
@@ -819,7 +887,7 @@ function renderSummary(customers,cases,logs,staffList,year,month){
 
   document.getElementById('summary-row').innerHTML=`
     <div class="summary-card">
-      <div class="summary-label">反響数</div>
+      <div class="summary-label">反響数（仲介事業部）</div>
       <div class="summary-val">${total.hankyoCount}</div>
       <div class="summary-sub">新規登録顧客</div>
     </div>
@@ -1126,8 +1194,8 @@ function renderUriage(){
     <div class="uri-table-wrap"><table class="uri">
       <thead><tr>
         <th class="left">№</th><th class="left">契約日</th><th class="left">決済日</th>
-        <th class="left">担当</th><th class="left">物件</th><th class="left">買主</th>
-        <th>総額</th><th>売上計上</th><th class="left">反響媒体</th><th class="left">ローン</th><th class="left">保管場所</th>
+        <th class="left">担当</th><th class="left">物件</th><th class="left">売主</th><th class="left">買主</th>
+        <th>総額</th><th>売上計上</th><th class="left">反響媒体</th><th class="left">保管場所</th>
       </tr></thead>
       <tbody>${rows.map(r=>`
         <tr>
@@ -1136,11 +1204,11 @@ function renderUriage(){
           <td class="left">${r.kessaiDate||'-'}</td>
           <td class="left">${r.staff}</td>
           <td class="left" title="${(r.shozai||'').replace(/"/g,'')}">${r.jukyo||r.shozai||'-'}<br><span style="font-size:10px;color:var(--text3)">${r.bukkenType||''}</span></td>
+          <td class="left">${r.urinushi||'-'}</td>
           <td class="left">${r.kainushi||'-'}</td>
           <td>${yen(r.sougaku)}</td>
           <td style="font-weight:700;color:var(--green)">${yen(r.uriage)}</td>
           <td class="left">${r.hankyoBaitai||'-'}</td>
-          <td class="left">${r.loanBank||'-'}</td>
           <td class="left"><span style="font-size:10px;color:${r.folder==='受信箱'?'var(--amber)':'var(--text3)'}">${r.folder||'-'}</span></td>
         </tr>`).join('')}</tbody>
     </table></div>`
