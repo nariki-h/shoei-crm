@@ -230,6 +230,12 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
 .uri-empty{background:var(--surface);border:1px dashed var(--border);border-radius:10px;padding:40px;text-align:center;color:var(--text3);font-size:13px;}
 .pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;background:var(--blue-light);color:var(--blue);}
 @media(max-width:760px){.uri-cards{grid-template-columns:repeat(2,1fr);}.tabs{padding:0 12px;}}
+.sh-lb{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text2);}
+.sh-in{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:16px;background:var(--card,#fff);color:var(--text);width:100%;box-sizing:border-box;}
+#sh-drop.drag{border-color:var(--accent,#2563eb);background:rgba(37,99,235,.06);color:var(--text);}
+.sh-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+.sh-badge.mikomi{background:#fff4e5;color:#b45309;}
+.sh-badge.kakutei{background:#e7f6ec;color:#15803d;}
 </style>
 </head>
 <body>
@@ -259,6 +265,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
   <div class="tabs">
     <button class="tab active" id="tab-kpi" onclick="switchTab('kpi')">KPI</button>
     <button class="tab" id="tab-uriage" onclick="switchTab('uriage')">売上（契約伝票）</button>
+    <button class="tab" id="tab-shiire" onclick="switchTab('shiire')">仕入</button>
   </div>
 
   <div class="controls">
@@ -377,6 +384,78 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
        <div id="uri-detail"></div>
      </div>
    </div><!-- /page-uriage -->
+
+   <!-- ===== 仕入 ===== -->
+   <div id="page-shiire" class="page" style="display:none;">
+     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+       <div class="section-title" style="margin:0;">仕入物件</div>
+       <span style="font-size:11px;color:var(--text3);" id="shiire-updated"></span>
+       <button class="refresh-btn" onclick="loadShiire()">🔄 一覧を再読込</button>
+     </div>
+
+     <div id="shiire-warn-box"></div>
+     <div class="uri-cards" id="shiire-cards"></div>
+
+     <!-- 追加フォーム -->
+     <div style="border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--card,#fff);">
+       <div class="section-title" style="margin-top:0;">物件を追加</div>
+
+       <div id="sh-drop" style="border:2px dashed var(--border);border-radius:10px;padding:20px;text-align:center;color:var(--text3);cursor:pointer;transition:.15s;font-size:13px;">
+         事業収支Excelをここにドラッグ＆ドロップ、またはクリックして選択<br>
+         <span style="font-size:11px;">（読み込めない・古いフォーマットの物件は、下の欄に直接入力してください）</span>
+       </div>
+       <input type="file" id="sh-file" accept=".xlsx,.xls" style="display:none;">
+       <div id="sh-extract-note" style="font-size:12px;margin:8px 0 0;"></div>
+
+       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px;">
+         <label class="sh-lb">物件名<input class="sh-in" id="sh-name" type="text" placeholder="例：江東区大島1-24-3"></label>
+         <label class="sh-lb">担当者<select class="sh-in" id="sh-staff"></select></label>
+         <label class="sh-lb">ステータス<select class="sh-in" id="sh-status">
+           <option>仕入検討</option><option>仕入済</option><option>販売中</option>
+           <option>契約済</option><option>決済済</option><option>解約</option>
+         </select></label>
+         <label class="sh-lb">仕入額<input class="sh-in sh-num" id="sh-buy" type="text" inputmode="numeric" oninput="shCalcArari()"></label>
+         <label class="sh-lb">諸経費<input class="sh-in sh-num" id="sh-exp" type="text" inputmode="numeric" oninput="shCalcArari()"></label>
+         <label class="sh-lb">販売予定額<input class="sh-in sh-num" id="sh-plansell" type="text" inputmode="numeric" oninput="shCalcArari()"></label>
+         <label class="sh-lb">見込み粗利（自動）<input class="sh-in" id="sh-arari" type="text" readonly style="background:var(--bg2,#f5f5f5);font-weight:700;"></label>
+       </div>
+
+       <details style="margin-top:12px;">
+         <summary style="cursor:pointer;font-size:13px;color:var(--text2);">詳細（日付・融資・実売価格・備考）</summary>
+         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:10px;">
+           <label class="sh-lb">仕入契約日<input class="sh-in" id="sh-buykeiyaku" type="date"></label>
+           <label class="sh-lb">仕入決済日<input class="sh-in" id="sh-buykessai" type="date"></label>
+           <label class="sh-lb">販売契約日<input class="sh-in" id="sh-sellkeiyaku" type="date"></label>
+           <label class="sh-lb">実売価格<input class="sh-in sh-num" id="sh-actualsell" type="text" inputmode="numeric"></label>
+           <label class="sh-lb">販売決済日<input class="sh-in" id="sh-sellkessai" type="date"></label>
+           <label class="sh-lb">金融機関<input class="sh-in" id="sh-bank" type="text"></label>
+           <label class="sh-lb">融資額<input class="sh-in sh-num" id="sh-loan" type="text" inputmode="numeric"></label>
+           <label class="sh-lb">返済期限<input class="sh-in" id="sh-loandue" type="date"></label>
+           <label class="sh-lb" style="grid-column:1/-1;">備考<textarea class="sh-in" id="sh-memo" rows="2"></textarea></label>
+         </div>
+       </details>
+
+       <div style="display:flex;align-items:center;gap:12px;margin-top:14px;">
+         <button class="refresh-btn" id="sh-submit" onclick="submitShiire()" style="background:var(--accent,#2563eb);color:#fff;">＋ この内容で登録</button>
+         <button class="refresh-btn" onclick="resetShiireForm()">クリア</button>
+         <span id="sh-msg" style="font-size:12px;"></span>
+       </div>
+     </div>
+
+     <div>
+       <div class="section-title">仕入物件一覧</div>
+       <div class="uri-table-wrap">
+         <table class="uri">
+           <thead><tr>
+             <th class="left">物件名</th><th class="left">担当者</th><th>ステータス</th>
+             <th>仕入額</th><th>諸経費</th><th>販売額</th><th>粗利</th><th>粗利率</th>
+           </tr></thead>
+           <tbody id="sh-tbody"></tbody>
+           <tfoot id="sh-tfoot"></tfoot>
+         </table>
+       </div>
+     </div>
+   </div><!-- /page-shiire -->
   </div>
 </div>
 
@@ -1239,21 +1318,241 @@ function renderUriage(){
 
 // タブ切替
 function switchTab(name){
-  const kpi=name==='kpi';
-  document.getElementById('tab-kpi').classList.toggle('active',kpi);
-  document.getElementById('tab-uriage').classList.toggle('active',!kpi);
-  document.getElementById('page-kpi').style.display=kpi?'flex':'none';
-  document.getElementById('page-uriage').style.display=kpi?'none':'flex';
-  if(!kpi&&denpyoData===null) loadDenpyo();
+  ['kpi','uriage','shiire'].forEach(t=>{
+    const btn=document.getElementById('tab-'+t);
+    const pg=document.getElementById('page-'+t);
+    if(btn) btn.classList.toggle('active',t===name);
+    if(pg) pg.style.display=(t===name)?'flex':'none';
+  });
+  if(name==='uriage'&&denpyoData===null) loadDenpyo();
+  if(name==='shiire'&&shiireData===null) loadShiire();
 }
 
 function showLoading(msg){document.getElementById('loading-text').textContent=msg;document.getElementById('loading').classList.add('show');}
 function hideLoading(){document.getElementById('loading').classList.remove('show');}
 function showToast(msg,err=false){const t=document.getElementById('toast');t.textContent=msg;t.style.background=err?'#d94f4f':'#2d9e6b';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
+/* ============================================================
+   仕入タブ：事業収支ドラッグ取り込み・手入力・SharePoint連携
+   ============================================================ */
+const SHIIRE_LIST='仕入物件リスト';
+let shiireData=null;               // 仕入物件リストのレコード配列
+let shiireAttachBuf=null;          // ドロップした事業収支の中身（添付用）
+let shiireAttachName='';
+
+// --- 数値ユーティリティ ---
+function shNum(v){ if(v==null) return 0; const n=Number(String(v).replace(/[^\d.-]/g,'')); return isNaN(n)?0:Math.round(n); }
+function shFmt(n){ return (n||0).toLocaleString('ja-JP'); }
+function shSetNum(id,val){ const el=document.getElementById(id); if(el) el.value = val?shFmt(val):''; }
+
+// --- SharePoint 書き込み（Bearerトークン利用。フォームダイジェスト不要）---
+async function spCreateItem(list,fields){
+  const token=await getToken();
+  const metaR=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')?$select=ListItemEntityTypeFullName`,
+    {headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  if(!metaR.ok) throw new Error(`リスト情報取得 HTTP ${metaR.status}`);
+  const typeName=(await metaR.json()).d.ListItemEntityTypeFullName;
+  const body=Object.assign({'__metadata':{'type':typeName}},fields);
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose'},
+    body:JSON.stringify(body)
+  });
+  if(!r.ok){const t=await r.text(); throw new Error(`登録 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  return (await r.json()).d;
+}
+async function spAttachFile(list,itemId,fileName,buf){
+  const token=await getToken();
+  const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${itemId})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName)}')`;
+  const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'},body:buf});
+  if(!r.ok) throw new Error(`添付 HTTP ${r.status}`);
+}
+
+// --- 事業収支Excel → 結論数値をラベル追跡で抽出 ---
+function extractShushi(buf){
+  const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:true});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+  const findLabel=(kw)=>{for(let r=0;r<rows.length;r++){const row=rows[r]||[];for(let c=0;c<row.length;c++){const v=row[c];if(v!=null&&String(v).includes(kw))return[r,c];}}return[null,null];};
+  const numRight=(r,c)=>{if(r==null)return null;const row=rows[r]||[];for(let cc=c+1;cc<row.length;cc++){if(typeof row[cc]==='number')return row[cc];}return null;};
+  const strRight=(r,c,skip)=>{if(r==null)return null;const row=rows[r]||[];for(let cc=c+1;cc<row.length;cc++){const v=row[cc];if(v!=null&&String(v).trim()!==''&&!(skip&&skip.test(String(v))))return String(v).trim();}return null;};
+  let p;
+  p=findLabel('原価合計'); const genka=numRight(p[0],p[1]);
+  p=findLabel('販売額合計'); const sell=numRight(p[0],p[1]);
+  p=findLabel('借入金額');   const tochi=numRight(p[0],p[1]);
+  p=findLabel('所在');       const name=strRight(p[0],p[1],/住居表示|地番|所在/);
+  p=findLabel('作成者');     const who=strRight(p[0],p[1],/作成者|作成日|検\s*印/);
+  return {
+    name:name||'',
+    staff:who?resolveStaff(who):'',
+    buyPrice: tochi!=null?Math.round(tochi):null,
+    expenses: (genka!=null&&tochi!=null)?Math.round(genka-tochi):null,
+    planSell: sell!=null?Math.round(sell):null,
+    ok:(genka!=null&&sell!=null)
+  };
+}
+
+// --- 担当者セレクトを担当者マスターから生成 ---
+function fillShiireStaff(selected){
+  const sel=document.getElementById('sh-staff'); if(!sel) return;
+  const list=(staffListCache&&staffListCache.length)?staffListCache:['金光 善慶','馬場 宏一','村上 光南','成木 健介'];
+  sel.innerHTML='<option value="">（選択）</option>'+list.map(n=>`<option${n===selected?' selected':''}>${n}</option>`).join('');
+}
+
+// --- 見込み粗利のライブ計算 ---
+function shCalcArari(){
+  const buy=shNum(document.getElementById('sh-buy').value);
+  const exp=shNum(document.getElementById('sh-exp').value);
+  const sell=shNum(document.getElementById('sh-plansell').value);
+  const arari=sell-buy-exp;
+  const el=document.getElementById('sh-arari');
+  el.value=(buy||exp||sell)?shFmt(arari):'';
+  el.style.color=arari<0?'#dc2626':'var(--text)';
+}
+
+// --- フォームに抽出結果を反映 ---
+function applyExtract(ex){
+  document.getElementById('sh-name').value=ex.name||'';
+  fillShiireStaff(ex.staff||'');
+  shSetNum('sh-buy',ex.buyPrice);
+  shSetNum('sh-exp',ex.expenses);
+  shSetNum('sh-plansell',ex.planSell);
+  shCalcArari();
+  const note=document.getElementById('sh-extract-note');
+  if(ex.ok){ note.style.color='#15803d'; note.textContent='✅ 事業収支から読み取りました。内容を確認して登録してください（原本は添付されます）。'; }
+  else { note.style.color='#b45309'; note.textContent='⚠️ 一部の数値を読み取れませんでした。空欄は手入力してください。'; }
+}
+
+function resetShiireForm(){
+  ['sh-name','sh-buy','sh-exp','sh-plansell','sh-arari','sh-actualsell','sh-bank','sh-loan','sh-memo'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['sh-buykeiyaku','sh-buykessai','sh-sellkeiyaku','sh-sellkessai','sh-loandue'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('sh-status').value='仕入検討';
+  fillShiireStaff('');
+  shiireAttachBuf=null; shiireAttachName='';
+  document.getElementById('sh-extract-note').textContent='';
+  document.getElementById('sh-msg').textContent='';
+}
+
+// --- 登録 ---
+async function submitShiire(){
+  const msg=document.getElementById('sh-msg');
+  const name=document.getElementById('sh-name').value.trim();
+  const staff=document.getElementById('sh-staff').value;
+  if(!name){ msg.style.color='#dc2626'; msg.textContent='物件名を入力してください。'; return; }
+  const dv=id=>{const v=document.getElementById(id).value; return v?v+'T00:00:00Z':null;};
+  const fields={
+    'Title':name,
+    'Tantosha':staff||null,
+    'Status':document.getElementById('sh-status').value,
+    'BuyPrice':shNum(document.getElementById('sh-buy').value),
+    'Expenses':shNum(document.getElementById('sh-exp').value),
+    'PlanSellPrice':shNum(document.getElementById('sh-plansell').value),
+    'ActualSellPrice':shNum(document.getElementById('sh-actualsell').value),
+    'LoanBank':document.getElementById('sh-bank').value.trim()||null,
+    'LoanAmount':shNum(document.getElementById('sh-loan').value),
+    'Memo':document.getElementById('sh-memo').value.trim()||null
+  };
+  const bk=dv('sh-buykeiyaku'); if(bk)fields.BuyKeiyakuDate=bk;
+  const bs=dv('sh-buykessai');  if(bs)fields.BuyKessaiDate=bs;
+  const sk=dv('sh-sellkeiyaku');if(sk)fields.SellKeiyakuDate=sk;
+  const ss=dv('sh-sellkessai'); if(ss)fields.SellKessaiDate=ss;
+  const ld=dv('sh-loandue');    if(ld)fields.LoanDueDate=ld;
+  const btn=document.getElementById('sh-submit'); btn.disabled=true;
+  msg.style.color='var(--text2)'; msg.textContent='登録中...';
+  try{
+    const created=await spCreateItem(SHIIRE_LIST,fields);
+    if(shiireAttachBuf){
+      try{ await spAttachFile(SHIIRE_LIST,created.Id||created.ID,shiireAttachName,shiireAttachBuf); }
+      catch(e){ msg.style.color='#b45309'; msg.textContent='登録OK（ただし事業収支の添付に失敗：'+e.message+'）'; }
+    }
+    if(!msg.textContent.includes('添付に失敗')){ msg.style.color='#15803d'; msg.textContent='✅ 登録しました'; }
+    resetShiireForm();
+    await loadShiire();
+  }catch(e){ msg.style.color='#dc2626'; msg.textContent='登録失敗：'+e.message; }
+  finally{ btn.disabled=false; }
+}
+
+// --- 粗利計算 ---
+function shiireProfit(it){
+  const cost=shNum(it.BuyPrice)+shNum(it.Expenses);
+  const actual=shNum(it.ActualSellPrice);
+  const sell=actual>0?actual:shNum(it.PlanSellPrice);
+  const kakutei=actual>0;
+  const profit=sell-cost;
+  const rate=sell>0?profit/sell:0;
+  return {cost,sell,profit,rate,kakutei};
+}
+
+// --- 一覧読み込み・描画 ---
+async function loadShiire(){
+  showLoading('仕入物件を読み込み中...');
+  try{
+    shiireData=await spGetItems(SHIIRE_LIST);
+    renderShiire();
+    document.getElementById('shiire-updated').textContent='最終更新 '+new Date().toLocaleString('ja-JP');
+  }catch(e){
+    document.getElementById('shiire-warn-box').innerHTML='<div class="uri-warn warn">仕入物件リストの読み込みに失敗：'+e.message+'</div>';
+    shiireData=[];
+  }finally{ hideLoading(); }
+}
+
+function renderShiire(){
+  fillShiireStaff(document.getElementById('sh-staff').value||'');
+  const data=shiireData||[];
+  let cntMikomi=0,cntKakutei=0,sumMikomi=0,sumKakutei=0;
+  const rows=data.map(it=>{
+    const p=shiireProfit(it);
+    if(p.kakutei){cntKakutei++;sumKakutei+=p.profit;} else {cntMikomi++;sumMikomi+=p.profit;}
+    const badge=p.kakutei?'<span class="sh-badge kakutei">確定</span>':'<span class="sh-badge mikomi">見込み</span>';
+    return `<tr>
+      <td class="left">${it.Title||''}</td>
+      <td class="left">${it.Tantosha||'—'}</td>
+      <td>${it.Status||'—'} ${badge}</td>
+      <td>¥${shFmt(shNum(it.BuyPrice))}</td>
+      <td>¥${shFmt(shNum(it.Expenses))}</td>
+      <td>¥${shFmt(p.sell)}</td>
+      <td style="font-weight:700;color:${p.profit<0?'#dc2626':'inherit'};">¥${shFmt(p.profit)}</td>
+      <td>${(p.rate*100).toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('sh-tbody').innerHTML=rows||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px;">まだ物件がありません。上のフォームから追加してください。</td></tr>';
+  document.getElementById('sh-tfoot').innerHTML=data.length?`<tr>
+     <td class="left" colspan="6">合計 ${data.length}件（見込み${cntMikomi}／確定${cntKakutei}）</td>
+     <td style="font-weight:700;">¥${shFmt(sumMikomi+sumKakutei)}</td><td></td></tr>`:'';
+  document.getElementById('shiire-cards').innerHTML=`
+    <div class="uri-card"><div class="lb">物件数</div><div class="vl">${data.length}</div></div>
+    <div class="uri-card"><div class="lb">見込み粗利 合計</div><div class="vl">¥${shFmt(sumMikomi)}</div></div>
+    <div class="uri-card"><div class="lb">確定粗利 合計</div><div class="vl">¥${shFmt(sumKakutei)}</div></div>
+    <div class="uri-card"><div class="lb">粗利 総合計</div><div class="vl">¥${shFmt(sumMikomi+sumKakutei)}</div></div>`;
+}
+
+// --- ドラッグ＆ドロップ配線 ---
+function wireShiireDrop(){
+  const drop=document.getElementById('sh-drop');
+  const file=document.getElementById('sh-file');
+  if(!drop||!file) return;
+  const handle=async(f)=>{
+    if(!f) return;
+    const note=document.getElementById('sh-extract-note');
+    note.style.color='var(--text2)'; note.textContent='読み込み中...';
+    try{
+      const buf=await f.arrayBuffer();
+      shiireAttachBuf=buf; shiireAttachName=f.name;
+      applyExtract(extractShushi(buf));
+    }catch(e){ note.style.color='#dc2626'; note.textContent='読み込み失敗：'+e.message; }
+  };
+  drop.addEventListener('click',()=>file.click());
+  file.addEventListener('change',e=>handle(e.target.files[0]));
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');handle(e.dataTransfer.files[0]);});
+}
+
 document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('login-btn').addEventListener('click',signIn);
   document.getElementById('logout-btn').addEventListener('click',signOut);
+  wireShiireDrop();
+  fillShiireStaff('');
   await initMSAL();
 });
 </script>
