@@ -1392,11 +1392,28 @@ function extractShushi(buf){
   };
 }
 
-// --- 担当者セレクトを担当者マスターから生成 ---
+// --- 担当者マスターを（未読なら）読み込む。KPIタブを開いていなくても効くように ---
+async function ensureStaffLoaded(){
+  if(staffListCache&&staffListCache.length) return;
+  try{
+    const items=await spGetItems('担当者マスター');
+    const list=items.map(s=>s.Title).filter(Boolean).filter(n=>!EXCLUDED_STAFF.has(n));
+    if(list.length) staffListCache=list;
+  }catch(e){/* 失敗時はフォールバック名で続行 */}
+}
+
+// --- 担当者セレクトを担当者マスターから生成（selected は姓だけでも前方一致で寄せる）---
 function fillShiireStaff(selected){
   const sel=document.getElementById('sh-staff'); if(!sel) return;
   const list=(staffListCache&&staffListCache.length)?staffListCache:['金光 善慶','馬場 宏一','村上 光南','成木 健介'];
-  sel.innerHTML='<option value="">（選択）</option>'+list.map(n=>`<option${n===selected?' selected':''}>${n}</option>`).join('');
+  let pick='';
+  if(selected){
+    const key=String(selected).replace(/[\s　]/g,'');
+    pick=list.find(n=>String(n).replace(/[\s　]/g,'')===key)
+       || list.find(n=>String(n).replace(/[\s　]/g,'').startsWith(key))
+       || '';
+  }
+  sel.innerHTML='<option value="">（選択）</option>'+list.map(n=>`<option${n===pick?' selected':''}>${n}</option>`).join('');
 }
 
 // --- 見込み粗利のライブ計算 ---
@@ -1487,6 +1504,7 @@ function shiireProfit(it){
 async function loadShiire(){
   showLoading('仕入物件を読み込み中...');
   try{
+    await ensureStaffLoaded();
     shiireData=await spGetItems(SHIIRE_LIST);
     renderShiire();
     document.getElementById('shiire-updated').textContent='最終更新 '+new Date().toLocaleString('ja-JP');
@@ -1538,6 +1556,7 @@ function wireShiireDrop(){
     try{
       const buf=await f.arrayBuffer();
       shiireAttachBuf=buf; shiireAttachName=f.name;
+      await ensureStaffLoaded();
       applyExtract(extractShushi(buf));
     }catch(e){ note.style.color='#dc2626'; note.textContent='読み込み失敗：'+e.message; }
   };
