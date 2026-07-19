@@ -236,6 +236,9 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
 .sh-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
 .sh-badge.mikomi{background:#fff4e5;color:#b45309;}
 .sh-badge.kakutei{background:#e7f6ec;color:#15803d;}
+.sh-rowbtn{padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card,#fff);color:var(--text2);font-size:12px;cursor:pointer;margin:0 2px;}
+.sh-rowbtn:hover{background:var(--surface);}
+.sh-rowbtn.del:hover{background:#fde8e8;color:#dc2626;border-color:#f5b5b5;}
 </style>
 </head>
 <body>
@@ -448,7 +451,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
          <table class="uri">
            <thead><tr>
              <th class="left">物件名</th><th class="left">担当者</th><th>ステータス</th>
-             <th>仕入額</th><th>諸経費</th><th>販売額</th><th>粗利</th><th>粗利率</th>
+             <th>仕入額</th><th>諸経費</th><th>販売額</th><th>粗利</th><th>粗利率</th><th>操作</th>
            </tr></thead>
            <tbody id="sh-tbody"></tbody>
            <tfoot id="sh-tfoot"></tfoot>
@@ -1339,6 +1342,7 @@ const SHIIRE_LIST='仕入物件リスト';
 let shiireData=null;               // 仕入物件リストのレコード配列
 let shiireAttachBuf=null;          // ドロップした事業収支の中身（添付用）
 let shiireAttachName='';
+let shiireEditId=null;             // 編集中アイテムのId（新規登録時はnull）
 
 // --- 数値ユーティリティ ---
 function shNum(v){ if(v==null) return 0; const n=Number(String(v).replace(/[^\d.-]/g,'')); return isNaN(n)?0:Math.round(n); }
@@ -1366,6 +1370,28 @@ async function spAttachFile(list,itemId,fileName,buf){
   const url=`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${itemId})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName)}')`;
   const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'},body:buf});
   if(!r.ok) throw new Error(`添付 HTTP ${r.status}`);
+}
+async function spUpdateItem(list,id,fields){
+  const token=await getToken();
+  const metaR=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')?$select=ListItemEntityTypeFullName`,
+    {headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  if(!metaR.ok) throw new Error(`リスト情報取得 HTTP ${metaR.status}`);
+  const typeName=(await metaR.json()).d.ListItemEntityTypeFullName;
+  const body=Object.assign({'__metadata':{'type':typeName}},fields);
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${id})`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-HTTP-Method':'MERGE','IF-MATCH':'*'},
+    body:JSON.stringify(body)
+  });
+  if(!r.ok){const t=await r.text(); throw new Error(`更新 HTTP ${r.status}: ${t.slice(0,200)}`);}
+}
+async function spDeleteItem(list,id){
+  const token=await getToken();
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${id})`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-HTTP-Method':'DELETE','IF-MATCH':'*'}
+  });
+  if(!r.ok){const t=await r.text(); throw new Error(`削除 HTTP ${r.status}: ${t.slice(0,200)}`);}
 }
 
 // --- 事業収支Excel → 結論数値をラベル追跡で抽出 ---
@@ -1446,8 +1472,55 @@ function resetShiireForm(){
   document.getElementById('sh-status').value='仕入検討';
   fillShiireStaff('');
   shiireAttachBuf=null; shiireAttachName='';
+  shiireEditId=null;
+  document.getElementById('sh-submit').textContent='＋ この内容で登録';
   document.getElementById('sh-extract-note').textContent='';
-  document.getElementById('sh-msg').textContent='';
+  const msg=document.getElementById('sh-msg'); if(msg) msg.textContent='';
+}
+
+// --- 一覧の行から編集開始 ---
+function editShiire(id){
+  const it=(shiireData||[]).find(x=>x.Id===id||x.ID===id);
+  if(!it) return;
+  const d10=v=>v?String(v).slice(0,10):'';
+  document.getElementById('sh-name').value=it.Title||'';
+  document.getElementById('sh-status').value=it.Status||'仕入検討';
+  fillShiireStaff(it.Tantosha||'');
+  shSetNum('sh-buy',shNum(it.BuyPrice));
+  shSetNum('sh-exp',shNum(it.Expenses));
+  shSetNum('sh-plansell',shNum(it.PlanSellPrice));
+  shSetNum('sh-actualsell',shNum(it.ActualSellPrice));
+  document.getElementById('sh-bank').value=it.LoanBank||'';
+  shSetNum('sh-loan',shNum(it.LoanAmount));
+  document.getElementById('sh-memo').value=it.Memo||'';
+  document.getElementById('sh-buykeiyaku').value=d10(it.BuyKeiyakuDate);
+  document.getElementById('sh-buykessai').value=d10(it.BuyKessaiDate);
+  document.getElementById('sh-sellkeiyaku').value=d10(it.SellKeiyakuDate);
+  document.getElementById('sh-sellkessai').value=d10(it.SellKessaiDate);
+  document.getElementById('sh-loandue').value=d10(it.LoanDueDate);
+  shCalcArari();
+  shiireEditId=it.Id!==undefined?it.Id:it.ID;
+  shiireAttachBuf=null; shiireAttachName='';   // 編集時は原本の差し替えはしない
+  document.getElementById('sh-submit').textContent='✓ 更新する';
+  const note=document.getElementById('sh-extract-note');
+  note.style.color='#2563eb'; note.textContent='「'+(it.Title||'')+'」を編集中です。実売価格や決済日を追記すると確定に変わります。';
+  document.getElementById('sh-drop').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+// --- 一覧の行から削除 ---
+async function deleteShiire(id){
+  const it=(shiireData||[]).find(x=>x.Id===id||x.ID===id);
+  const name=it?(it.Title||'この物件'):'この物件';
+  if(!confirm('「'+name+'」を削除します。\n添付した事業収支も一緒に消えます。よろしいですか？')) return;
+  showLoading('削除中...');
+  try{
+    await spDeleteItem(SHIIRE_LIST,id);
+    if(shiireEditId===id) resetShiireForm();
+    await loadShiire();
+  }catch(e){
+    hideLoading();
+    alert('削除に失敗しました：'+e.message);
+  }
 }
 
 // --- 登録 ---
@@ -1475,17 +1548,24 @@ async function submitShiire(){
   const ss=dv('sh-sellkessai'); if(ss)fields.SellKessaiDate=ss;
   const ld=dv('sh-loandue');    if(ld)fields.LoanDueDate=ld;
   const btn=document.getElementById('sh-submit'); btn.disabled=true;
-  msg.style.color='var(--text2)'; msg.textContent='登録中...';
+  msg.style.color='var(--text2)'; msg.textContent=shiireEditId?'更新中...':'登録中...';
   try{
-    const created=await spCreateItem(SHIIRE_LIST,fields);
-    if(shiireAttachBuf){
-      try{ await spAttachFile(SHIIRE_LIST,created.Id||created.ID,shiireAttachName,shiireAttachBuf); }
-      catch(e){ msg.style.color='#b45309'; msg.textContent='登録OK（ただし事業収支の添付に失敗：'+e.message+'）'; }
+    if(shiireEditId){
+      await spUpdateItem(SHIIRE_LIST,shiireEditId,fields);
+      msg.style.color='#15803d'; msg.textContent='✅ 更新しました';
+      resetShiireForm();
+      await loadShiire();
+    }else{
+      const created=await spCreateItem(SHIIRE_LIST,fields);
+      if(shiireAttachBuf){
+        try{ await spAttachFile(SHIIRE_LIST,created.Id||created.ID,shiireAttachName,shiireAttachBuf); }
+        catch(e){ msg.style.color='#b45309'; msg.textContent='登録OK（ただし事業収支の添付に失敗：'+e.message+'）'; }
+      }
+      if(!msg.textContent.includes('添付に失敗')){ msg.style.color='#15803d'; msg.textContent='✅ 登録しました'; }
+      resetShiireForm();
+      await loadShiire();
     }
-    if(!msg.textContent.includes('添付に失敗')){ msg.style.color='#15803d'; msg.textContent='✅ 登録しました'; }
-    resetShiireForm();
-    await loadShiire();
-  }catch(e){ msg.style.color='#dc2626'; msg.textContent='登録失敗：'+e.message; }
+  }catch(e){ msg.style.color='#dc2626'; msg.textContent=(shiireEditId?'更新':'登録')+'失敗：'+e.message; }
   finally{ btn.disabled=false; }
 }
 
@@ -1531,12 +1611,16 @@ function renderShiire(){
       <td>¥${shFmt(p.sell)}</td>
       <td style="font-weight:700;color:${p.profit<0?'#dc2626':'inherit'};">¥${shFmt(p.profit)}</td>
       <td>${(p.rate*100).toFixed(1)}%</td>
+      <td style="white-space:nowrap;">
+        <button class="sh-rowbtn" onclick="editShiire(${it.Id})">✏️ 編集</button>
+        <button class="sh-rowbtn del" onclick="deleteShiire(${it.Id})">🗑️</button>
+      </td>
     </tr>`;
   }).join('');
-  document.getElementById('sh-tbody').innerHTML=rows||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px;">まだ物件がありません。上のフォームから追加してください。</td></tr>';
+  document.getElementById('sh-tbody').innerHTML=rows||'<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:20px;">まだ物件がありません。上のフォームから追加してください。</td></tr>';
   document.getElementById('sh-tfoot').innerHTML=data.length?`<tr>
      <td class="left" colspan="6">合計 ${data.length}件（見込み${cntMikomi}／確定${cntKakutei}）</td>
-     <td style="font-weight:700;">¥${shFmt(sumMikomi+sumKakutei)}</td><td></td></tr>`:'';
+     <td style="font-weight:700;">¥${shFmt(sumMikomi+sumKakutei)}</td><td></td><td></td></tr>`:'';
   document.getElementById('shiire-cards').innerHTML=`
     <div class="uri-card"><div class="lb">物件数</div><div class="vl">${data.length}</div></div>
     <div class="uri-card"><div class="lb">見込み粗利 合計</div><div class="vl">¥${shFmt(sumMikomi)}</div></div>
