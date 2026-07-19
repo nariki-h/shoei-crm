@@ -383,6 +383,19 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
      </div>
 
      <div>
+       <div class="section-title">チーム別売上</div>
+       <div class="uri-table-wrap">
+         <table class="uri">
+           <thead><tr>
+             <th class="left">チーム</th><th>契約件数</th><th>売上計上金額</th><th>構成比</th><th>取引総額</th>
+           </tr></thead>
+           <tbody id="uri-team-tbody"></tbody>
+           <tfoot id="uri-team-tfoot"></tfoot>
+         </table>
+       </div>
+     </div>
+
+     <div>
        <div class="section-title">契約明細</div>
        <div id="uri-detail"></div>
      </div>
@@ -471,6 +484,9 @@ const CLIENT_ID='ebb78259-3e33-42c0-a391-25bedb2ca478';
 const TENANT_ID='c8bff07e-b699-4853-8c26-19be4a8759be';
 const SITE_URL='https://shoeih.sharepoint.com/sites/Shoei-RealEstate';
 const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All'];
+// 担当者→チームの対応表。担当者マスターの「チーム」列から loadData で構築する。
+// 例: {'金光善慶':'A','馬場 宏一':'A','村上光南':'A'}。チーム空欄の人（成木/CO/その他）は載らない。
+let staffTeamMap={};
 // 一人当たりの月次目標。全体目標は「この値 × 目標人数 × 月数」で自動計算される。
 const TARGET_ANNAI=15;   // 案内 15件/月/人
 const TARGET_RAISHA=8;   // 来社  8件/月/人
@@ -697,6 +713,17 @@ async function loadData(){
     if(staffList.length===0)staffList.push('金光善慶','馬場 宏一','村上光南','成木健介');
     staffListCache=staffList;
 
+    // 担当者マスターの「チーム」列から 名前→チーム の対応表を作る。
+    // 列の内部名は環境により異なりうるので候補を順に試す（日本語列はUnicodeエスケープ形式）。
+    const teamOf=s=>s['OData__x30c1__x30fc__x30e0_']??s['チーム']??s['Team']??s['Team0']??'';
+    staffTeamMap={};
+    staffItems.forEach(s=>{
+      const name=s.Title;
+      if(!name) return;
+      const t=String(teamOf(s)||'').trim();
+      if(t) staffTeamMap[name]=t;   // 空欄（成木/CO事業部/その他）はチーム無しとして登録しない
+    });
+
     const months=getMonthRange();
 
     document.getElementById('summary-title').textContent=
@@ -740,9 +767,7 @@ function ownerIncluded(owner,staff){
   return true;
 }
 
-// 【将来のチーム分け用】担当者→チームの対応表。
-// 今は未使用。担当者マスターに「チーム」列を足してそこから読む形に差し替える予定。
-const TEAM_MAP={};
+// staffTeamMap（担当者→チーム対応表）は上部でグローバル宣言し、loadDataで構築する。
 
 // 反響の内訳：流入総数／仲介事業部（=KPI母数）／対象外(CO事業部・その他)の内訳。
 // includedは ownerIncluded(owner,null) と同じ判定なので、KPI表の合計行の反響数と必ず一致する。
@@ -1175,10 +1200,18 @@ function parseDenpyo(buf,fileName,updated,folder){
   }
 
   const sei=v('AQ3');
+  // 課長は所属チーム長(BA3)ではなく、歩合欄(T36〜/X36〜)の配分を正とする。
+  // 通常は所属チーム長1名に全額（割合1）だが、ヘルプ時は複数課長へ按分される想定。
+  // 表示は当面しないが、割合込みで正確に持っておく（後で課長別ビューを足せるように）。
+  const kachoList=commission
+    .filter(c=>c.role==='課長' && c.name)
+    .map(c=>({name:resolveStaff(c.name), rate:c.rate, amount:c.amount}));
   return {
     no:v('AW2'), fileName, updated, folder:folder||'',
     keiyakuDate:d('I3'), hikiwatashiDate:d('T3'), kessaiDate:d('AE3'),
-    seiName:sei, staff:resolveStaff(sei), kacho:v('BA3'),
+    seiName:sei, staff:resolveStaff(sei),
+    kacho:kachoList.map(k=>k.name).join(' / '),  // 表示用の課長名（複数時はスラッシュ区切り）
+    kachoList,                                    // 集計用：課長ごとの割合・金額
     taiyo:[v('I4'),v('T4')].filter(Boolean).join(' / '),
     bukkenType:bukken,
     shozai:v('I7')||'', jukyo:v('I8')||'',
@@ -1261,6 +1294,8 @@ function renderUriage(){
     document.getElementById('uri-detail').innerHTML='<div class="uri-empty">「伝票を再読込」を押してください</div>';
     document.getElementById('uri-staff-tbody').innerHTML='';
     document.getElementById('uri-staff-tfoot').innerHTML='';
+    const _tb=document.getElementById('uri-team-tbody'); if(_tb) _tb.innerHTML='';
+    const _tf=document.getElementById('uri-team-tfoot'); if(_tf) _tf.innerHTML='';
     return;
   }
 
@@ -1291,6 +1326,28 @@ function renderUriage(){
     <td>${totUri?Math.round(o.uri/totUri*100):0}%</td><td>${yen(o.sou)}</td></tr>`).join('')
     :'<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>';
   document.getElementById('uri-staff-tfoot').innerHTML=arr.length?
+    `<tr><td class="left">合計</td><td>${rows.length}</td><td>${yen(totUri)}</td><td>100%</td><td>${yen(totSou)}</td></tr>`:'';
+
+  // チーム別：担当者マスターのチーム列（staffTeamMap）で担当者→チームを判定。
+  // チーム未設定の担当（成木/CO/その他）は「チーム外」としてまとめる。日々の達成状況把握用に
+  // 課長の営業分も含めた素直な合計（=そのチーム全員の売上合計）を出す。
+  const byTeam=new Map();
+  rows.forEach(r=>{
+    const team=staffTeamMap[r.staff] ? `${staffTeamMap[r.staff]}チーム` : 'チーム外';
+    if(!byTeam.has(team)) byTeam.set(team,{cnt:0,uri:0,sou:0});
+    const o=byTeam.get(team); o.cnt++; o.uri+=r.uriage; o.sou+=r.sougaku;
+  });
+  // チーム名で並べ、「チーム外」は最後に回す
+  const teamArr=[...byTeam.entries()].sort((a,b)=>{
+    if(a[0]==='チーム外') return 1;
+    if(b[0]==='チーム外') return -1;
+    return a[0].localeCompare(b[0],'ja');
+  });
+  document.getElementById('uri-team-tbody').innerHTML=teamArr.length?teamArr.map(([k,o])=>`
+    <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td><td>${yen(o.uri)}</td>
+    <td>${totUri?Math.round(o.uri/totUri*100):0}%</td><td>${yen(o.sou)}</td></tr>`).join('')
+    :'<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>';
+  document.getElementById('uri-team-tfoot').innerHTML=teamArr.length?
     `<tr><td class="left">合計</td><td>${rows.length}</td><td>${yen(totUri)}</td><td>100%</td><td>${yen(totSou)}</td></tr>`:'';
 
   // 明細
