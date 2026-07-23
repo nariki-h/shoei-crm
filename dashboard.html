@@ -469,8 +469,8 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
        <div class="uri-table-wrap">
          <table class="uri">
            <thead><tr>
-             <th class="left">物件名</th><th class="left">担当者</th><th>ステータス</th><th>仕入契約日</th>
-             <th>仕入額</th><th>諸経費</th><th>販売額</th><th>粗利</th><th>粗利率</th><th>操作</th>
+             <th class="left">物件名</th><th class="left">担当者</th><th>ステータス</th><th>仕入契約日</th><th>販売決済日</th>
+             <th>原価</th><th>見込み粗利</th><th>確定粗利</th><th>差異</th><th>操作</th>
            </tr></thead>
            <tbody id="sh-tbody"></tbody>
            <tfoot id="sh-tfoot"></tfoot>
@@ -1681,14 +1681,17 @@ async function submitShiire(){
 }
 
 // --- 粗利計算 ---
+// 見込み粗利＝販売予定額−原価（仕入契約のタイミングで計上）
+// 確定粗利＝実売価格−原価（販売決済のタイミングで確定）
+// 「確定」の判定は販売決済日の有無。実売価格だけ入って決済日が空の物件は
+// どの月にもカウントされないため、一覧で「決済日未入力」の警告を出す。
 function shiireProfit(it){
   const cost=shNum(it.BuyPrice)+shNum(it.Expenses);
+  const mikomi=shNum(it.PlanSellPrice)-cost;
   const actual=shNum(it.ActualSellPrice);
-  const sell=actual>0?actual:shNum(it.PlanSellPrice);
-  const kakutei=actual>0;
-  const profit=sell-cost;
-  const rate=sell>0?profit/sell:0;
-  return {cost,sell,profit,rate,kakutei};
+  const kakutei=actual>0?(actual-cost):null;   // 計算可能なら値を持つ（集計はsettledで判定）
+  const settled=!!it.SellKessaiDate;
+  return {cost,mikomi,actual,kakutei,settled};
 }
 
 // --- 一覧読み込み・描画 ---
@@ -1711,54 +1714,82 @@ function renderShiire(){
   const months=getMonthRange();
   const sa=document.getElementById('sh-showall');
   const showAll=!!(sa&&sa.checked);
-  // 仕入契約日基準で期間に振り分け。日付未入力（検討中など）は常に表示。
-  const inP=[],noDate=[],outP=[];
-  all.forEach(it=>{
-    if(!it.BuyKeiyakuDate) noDate.push(it);
-    else if(inPeriod(it.BuyKeiyakuDate,months)) inP.push(it);
-    else outP.push(it);
+  const inBuy=it=>!!it.BuyKeiyakuDate&&inPeriod(it.BuyKeiyakuDate,months);
+  const inSell=it=>!!it.SellKessaiDate&&inPeriod(it.SellKessaiDate,months);
+
+  // ① 仕入契約ベース：件数＋見込み粗利の計上
+  const buyRows=all.filter(inBuy);
+  const mikomiSum=buyRows.reduce((s,it)=>s+shiireProfit(it).mikomi,0);
+  // ② 販売決済ベース：件数＋確定粗利＋見込み→確定の差異
+  const sellRows=all.filter(inSell);
+  let kakuteiSum=0,diffSum=0,diffCnt=0;
+  sellRows.forEach(it=>{
+    const p=shiireProfit(it);
+    if(p.kakutei!=null){kakuteiSum+=p.kakutei;diffSum+=p.kakutei-p.mikomi;diffCnt++;}
   });
-  const byDate=(a,b)=>String(a.BuyKeiyakuDate||'').localeCompare(String(b.BuyKeiyakuDate||''));
-  inP.sort(byDate); outP.sort(byDate);
-  const shown=showAll?[...inP,...outP].sort(byDate).concat(noDate):[...inP,...noDate];
+  // ③ 保有中（販売決済がまだ）＝期間に関係ない在庫。解約は除く。
+  const holding=all.filter(it=>!it.SellKessaiDate&&it.Status!=='解約');
+  const holdingMikomi=holding.reduce((s,it)=>s+shiireProfit(it).mikomi,0);
+
+  // 表示行：どちらかの基準で期間に該当＋日付未入力（常時表示）
+  const noDate=all.filter(it=>!it.BuyKeiyakuDate&&!it.SellKessaiDate);
+  const hit=all.filter(it=>inBuy(it)||inSell(it));
+  const outCnt=all.length-hit.length-noDate.length;
+  const byDate=(a,b)=>String(a.BuyKeiyakuDate||a.SellKessaiDate||'').localeCompare(String(b.BuyKeiyakuDate||b.SellKessaiDate||''));
+  const shown=showAll?[...all].sort(byDate):[...hit.sort(byDate),...noDate];
+
   // 期間ラベル
   const a0=months[0],b0=months[months.length-1];
   const plabel=months.length===1?`${a0.year}年${a0.month}月`:`${a0.year}年${a0.month}月〜${b0.year}年${b0.month}月`;
   const noteEl=document.getElementById('sh-period-note');
   if(noteEl) noteEl.textContent=showAll
-    ?'全件表示（仕入契約日順）'
-    :`${plabel}・仕入契約日基準${outP.length?`（期間外 ${outP.length}件は非表示）`:''}`;
-  let cntMikomi=0,cntKakutei=0,sumMikomi=0,sumKakutei=0;
+    ?'全件表示（日付順）'
+    :`${plabel}・仕入契約日／販売決済日基準${outCnt>0?`（期間外 ${outCnt}件は非表示）`:''}`;
+
+  const d10=v=>v?String(v).slice(0,10).replace(/-/g,'/'):'<span style="color:var(--text3);">—</span>';
+  const yen=v=>'¥'+shFmt(Math.round(v));
+  const pct=(p,base)=>base>0?`<div style="font-size:10px;color:var(--text3);">${(p/base*100).toFixed(1)}%</div>`:'';
+  let shownMikomi=0,shownKakutei=0,shownDiff=0;
   const rows=shown.map(it=>{
     const p=shiireProfit(it);
-    if(p.kakutei){cntKakutei++;sumKakutei+=p.profit;} else {cntMikomi++;sumMikomi+=p.profit;}
-    const badge=p.kakutei?'<span class="sh-badge kakutei">確定</span>':'<span class="sh-badge mikomi">見込み</span>';
-    const bkd=it.BuyKeiyakuDate?String(it.BuyKeiyakuDate).slice(0,10).replace(/-/g,'/'):'<span style="color:var(--text3);">未入力</span>';
+    shownMikomi+=p.mikomi;
+    const badge=p.settled?'<span class="sh-badge kakutei">確定</span>':'<span class="sh-badge mikomi">見込み</span>';
+    let kakuteiCell='<span style="color:var(--text3);">—</span>', diffCell='<span style="color:var(--text3);">—</span>';
+    if(p.kakutei!=null){
+      const warn=p.settled?'':'<div style="font-size:10px;color:#b45309;">⚠ 決済日未入力</div>';
+      kakuteiCell=`<span style="font-weight:700;color:${p.kakutei<0?'#dc2626':'inherit'};">${yen(p.kakutei)}</span>${pct(p.kakutei,p.actual)}${warn}`;
+      const diff=p.kakutei-p.mikomi;
+      diffCell=`<span style="font-weight:600;color:${diff<0?'#dc2626':'#15803d'};">${diff>=0?'+':''}${yen(diff).replace('¥-','−¥')}</span>`;
+      if(p.settled){shownKakutei+=p.kakutei;shownDiff+=diff;}
+    }
     return `<tr>
       <td class="left">${it.Title||''}</td>
       <td class="left">${it.Tantosha||'—'}</td>
       <td>${it.Status||'—'} ${badge}</td>
-      <td>${bkd}</td>
-      <td>¥${shFmt(shNum(it.BuyPrice))}</td>
-      <td>¥${shFmt(shNum(it.Expenses))}</td>
-      <td>¥${shFmt(p.sell)}</td>
-      <td style="font-weight:700;color:${p.profit<0?'#dc2626':'inherit'};">¥${shFmt(p.profit)}</td>
-      <td>${(p.rate*100).toFixed(1)}%</td>
+      <td>${it.BuyKeiyakuDate?d10(it.BuyKeiyakuDate):'<span style="color:var(--text3);">未入力</span>'}</td>
+      <td>${d10(it.SellKessaiDate)}</td>
+      <td title="仕入 ${yen(shNum(it.BuyPrice))} ＋ 諸経費 ${yen(shNum(it.Expenses))}">${yen(p.cost)}</td>
+      <td style="color:${p.mikomi<0?'#dc2626':'inherit'};">${yen(p.mikomi)}${pct(p.mikomi,shNum(it.PlanSellPrice))}</td>
+      <td>${kakuteiCell}</td>
+      <td>${diffCell}</td>
       <td style="white-space:nowrap;">
         <button class="sh-rowbtn" onclick="editShiire(${it.Id})">✏️ 編集</button>
         <button class="sh-rowbtn del" onclick="deleteShiire(${it.Id})">🗑️</button>
       </td>
     </tr>`;
   }).join('');
-  document.getElementById('sh-tbody').innerHTML=rows||`<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px;">${all.length?'この期間に仕入契約日が該当する物件はありません。「全件表示」で確認できます。':'まだ物件がありません。上のフォームから追加してください。'}</td></tr>`;
+  document.getElementById('sh-tbody').innerHTML=rows||`<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px;">${all.length?'この期間に仕入契約・販売決済が該当する物件はありません。「全件表示」で確認できます。':'まだ物件がありません。上のフォームから追加してください。'}</td></tr>`;
   document.getElementById('sh-tfoot').innerHTML=shown.length?`<tr>
-     <td class="left" colspan="7">合計 ${shown.length}件（見込み${cntMikomi}／確定${cntKakutei}${noDate.length?`・日付未入力${noDate.length}`:''}）</td>
-     <td style="font-weight:700;">¥${shFmt(sumMikomi+sumKakutei)}</td><td></td><td></td></tr>`:'';
+     <td class="left" colspan="6">表示 ${shown.length}件の単純合計${noDate.length?`（日付未入力 ${noDate.length}件を含む）`:''}　※期間の計上額は上のカード参照</td>
+     <td style="font-weight:700;">${yen(shownMikomi)}</td>
+     <td style="font-weight:700;">${yen(shownKakutei)}</td>
+     <td style="font-weight:700;color:${shownDiff<0?'#dc2626':'#15803d'};">${shownDiff>=0?'+':''}${yen(shownDiff).replace('¥-','−¥')}</td>
+     <td></td></tr>`:'';
   document.getElementById('shiire-cards').innerHTML=`
-    <div class="uri-card"><div class="lb">物件数</div><div class="vl">${shown.length}</div></div>
-    <div class="uri-card"><div class="lb">見込み粗利 合計</div><div class="vl">¥${shFmt(sumMikomi)}</div></div>
-    <div class="uri-card"><div class="lb">確定粗利 合計</div><div class="vl">¥${shFmt(sumKakutei)}</div></div>
-    <div class="uri-card"><div class="lb">粗利 総合計</div><div class="vl">¥${shFmt(sumMikomi+sumKakutei)}</div></div>`;
+    <div class="uri-card"><div class="lb">仕入契約（見込み計上）</div><div class="vl">${buyRows.length}件</div><div class="lb" style="margin-top:2px;">見込み粗利 ${yen(mikomiSum)}</div></div>
+    <div class="uri-card"><div class="lb">販売決済（粗利確定）</div><div class="vl">${sellRows.length}件</div><div class="lb" style="margin-top:2px;">確定粗利 ${yen(kakuteiSum)}</div></div>
+    <div class="uri-card"><div class="lb">見込み→確定 差異</div><div class="vl" style="color:${diffSum<0?'#dc2626':'#15803d'};">${diffSum>=0?'+':''}${yen(diffSum).replace('¥-','−¥')}</div><div class="lb" style="margin-top:2px;">期間内決済 ${diffCnt}件分</div></div>
+    <div class="uri-card"><div class="lb">保有中（未決済・全期間）</div><div class="vl">${holding.length}件</div><div class="lb" style="margin-top:2px;">見込み粗利 ${yen(holdingMikomi)}</div></div>`;
 }
 
 // --- ドラッグ＆ドロップ配線 ---
