@@ -436,7 +436,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
          <label class="sh-lb">見込み粗利（自動）<input class="sh-in" id="sh-arari" type="text" readonly style="background:var(--bg2,#f5f5f5);font-weight:700;"></label>
        </div>
 
-       <details style="margin-top:12px;">
+       <details id="sh-details" style="margin-top:12px;">
          <summary style="cursor:pointer;font-size:13px;color:var(--text2);">詳細（日付・融資・実売価格・備考）</summary>
          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:10px;">
            <label class="sh-lb">仕入契約日<input class="sh-in" id="sh-buykeiyaku" type="date"></label>
@@ -459,11 +459,17 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
      </div>
 
      <div>
-       <div class="section-title">仕入物件一覧</div>
+       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+         <div class="section-title" style="margin-bottom:6px;">仕入物件一覧</div>
+         <span id="sh-period-note" style="font-size:11px;color:var(--text3);"></span>
+         <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer;margin-left:auto;">
+           <input type="checkbox" id="sh-showall" onchange="renderShiire()">全件表示
+         </label>
+       </div>
        <div class="uri-table-wrap">
          <table class="uri">
            <thead><tr>
-             <th class="left">物件名</th><th class="left">担当者</th><th>ステータス</th>
+             <th class="left">物件名</th><th class="left">担当者</th><th>ステータス</th><th>仕入契約日</th>
              <th>仕入額</th><th>諸経費</th><th>販売額</th><th>粗利</th><th>粗利率</th><th>操作</th>
            </tr></thead>
            <tbody id="sh-tbody"></tbody>
@@ -748,6 +754,7 @@ async function loadData(){
     renderHankyoBreakdown(customers,months);
 
     if(denpyoData) renderUriage();
+    if(shiireData) renderShiire();
     showToast('更新しました');
   }catch(e){showToast('エラー: '+e.message,true);}
   hideLoading();
@@ -1451,7 +1458,18 @@ async function spDeleteItem(list,id){
   if(!r.ok){const t=await r.text(); throw new Error(`削除 HTTP ${r.status}: ${t.slice(0,200)}`);}
 }
 
-// --- 事業収支Excel → 結論数値をラベル追跡で抽出 ---
+// --- 事業収支Excel → 結論数値・日付をラベル追跡で抽出 ---
+// 15行目のような「ラベル・値・ラベル・値」の横並び行では、右走査の途中で
+// 別のラベルに当たったら打ち切る（＝その項目は空欄扱い）。隣の値の誤取得を防ぐ。
+const SH_LABELS=/仕入契約日|仕入決済日|販売契約日|販売決済日|実売価格|金融機関|融資額|返済期限|販売額合計|原価合計|借入金額/;
+function shToYMD(v){
+  if(v==null)return'';
+  if(v instanceof Date){ if(isNaN(v))return''; const d=new Date(v.getTime()+12*3600*1000); return d.toISOString().slice(0,10); }
+  if(typeof v==='number'){ if(v<20000||v>80000)return''; const d=new Date(Math.round((v-25569)*86400*1000)+12*3600*1000); return d.toISOString().slice(0,10); }
+  const s=String(v).trim().replace(/[年月]/g,'/').replace(/日/g,'');
+  const m=s.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  return m?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`:'';
+}
 function extractShushi(buf){
   const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:true});
   const ws=wb.Sheets[wb.SheetNames[0]];
@@ -1459,18 +1477,42 @@ function extractShushi(buf){
   const findLabel=(kw)=>{for(let r=0;r<rows.length;r++){const row=rows[r]||[];for(let c=0;c<row.length;c++){const v=row[c];if(v!=null&&String(v).includes(kw))return[r,c];}}return[null,null];};
   const numRight=(r,c)=>{if(r==null)return null;const row=rows[r]||[];for(let cc=c+1;cc<row.length;cc++){if(typeof row[cc]==='number')return row[cc];}return null;};
   const strRight=(r,c,skip)=>{if(r==null)return null;const row=rows[r]||[];for(let cc=c+1;cc<row.length;cc++){const v=row[cc];if(v!=null&&String(v).trim()!==''&&!(skip&&skip.test(String(v))))return String(v).trim();}return null;};
+  // ラベルの右の「最初の非空セル」。別ラベル（文字列）に当たったら打ち切り。
+  const cellRight=(kw)=>{
+    const [r,c]=findLabel(kw); if(r==null)return null;
+    const row=rows[r]||[];
+    for(let cc=c+1;cc<row.length;cc++){
+      const v=row[cc];
+      if(v==null||String(v).trim()==='')continue;
+      if(typeof v==='string'&&SH_LABELS.test(v))return null;
+      return v;
+    }
+    return null;
+  };
+  const dateAt=(kw)=>shToYMD(cellRight(kw));
   let p;
   p=findLabel('原価合計'); const genka=numRight(p[0],p[1]);
   p=findLabel('販売額合計'); const sell=numRight(p[0],p[1]);
   p=findLabel('借入金額');   const tochi=numRight(p[0],p[1]);
   p=findLabel('所在');       const name=strRight(p[0],p[1],/住居表示|地番|所在/);
   p=findLabel('作成者');     const who=strRight(p[0],p[1],/作成者|作成日|検\s*印/);
+  const bankRaw=cellRight('金融機関');
+  const loanRaw=cellRight('融資額');
+  const actualRaw=cellRight('実売価格');
   return {
     name:name||'',
     staff:who?resolveStaff(who):'',
     buyPrice: tochi!=null?Math.round(tochi):null,
     expenses: (genka!=null&&tochi!=null)?Math.round(genka-tochi):null,
     planSell: sell!=null?Math.round(sell):null,
+    buyKeiyaku: dateAt('仕入契約日'),
+    buyKessai:  dateAt('仕入決済日'),
+    sellKeiyaku:dateAt('販売契約日'),
+    sellKessai: dateAt('販売決済日'),
+    loanDue:    dateAt('返済期限'),
+    bank: (typeof bankRaw==='string')?bankRaw.trim():'',
+    loanAmount: (typeof loanRaw==='number')?Math.round(loanRaw):null,
+    actualSell: (typeof actualRaw==='number')?Math.round(actualRaw):null,
     ok:(genka!=null&&sell!=null)
   };
 }
@@ -1517,6 +1559,18 @@ function applyExtract(ex){
   shSetNum('sh-buy',ex.buyPrice);
   shSetNum('sh-exp',ex.expenses);
   shSetNum('sh-plansell',ex.planSell);
+  // 詳細欄（日付・融資・実売）— 収支側に入力があるものだけ反映。空欄は手入力のまま。
+  const setIf=(id,v)=>{ if(v!=null&&v!=='')document.getElementById(id).value=v; };
+  setIf('sh-buykeiyaku',ex.buyKeiyaku);
+  setIf('sh-buykessai',ex.buyKessai);
+  setIf('sh-sellkeiyaku',ex.sellKeiyaku);
+  setIf('sh-sellkessai',ex.sellKessai);
+  setIf('sh-loandue',ex.loanDue);
+  setIf('sh-bank',ex.bank);
+  if(ex.loanAmount!=null)shSetNum('sh-loan',ex.loanAmount);
+  if(ex.actualSell!=null)shSetNum('sh-actualsell',ex.actualSell);
+  const gotDetail=!!(ex.buyKeiyaku||ex.buyKessai||ex.sellKeiyaku||ex.sellKessai||ex.loanDue||ex.bank||ex.loanAmount!=null||ex.actualSell!=null);
+  const det=document.getElementById('sh-details'); if(det&&gotDetail)det.open=true;
   shCalcArari();
   const note=document.getElementById('sh-extract-note');
   if(ex.ok){ note.style.color='#15803d'; note.textContent='✅ 事業収支から読み取りました。内容を確認して登録してください（原本は添付されます）。'; }
@@ -1653,16 +1707,38 @@ async function loadShiire(){
 
 function renderShiire(){
   fillShiireStaff(document.getElementById('sh-staff').value||'');
-  const data=shiireData||[];
+  const all=shiireData||[];
+  const months=getMonthRange();
+  const sa=document.getElementById('sh-showall');
+  const showAll=!!(sa&&sa.checked);
+  // 仕入契約日基準で期間に振り分け。日付未入力（検討中など）は常に表示。
+  const inP=[],noDate=[],outP=[];
+  all.forEach(it=>{
+    if(!it.BuyKeiyakuDate) noDate.push(it);
+    else if(inPeriod(it.BuyKeiyakuDate,months)) inP.push(it);
+    else outP.push(it);
+  });
+  const byDate=(a,b)=>String(a.BuyKeiyakuDate||'').localeCompare(String(b.BuyKeiyakuDate||''));
+  inP.sort(byDate); outP.sort(byDate);
+  const shown=showAll?[...inP,...outP].sort(byDate).concat(noDate):[...inP,...noDate];
+  // 期間ラベル
+  const a0=months[0],b0=months[months.length-1];
+  const plabel=months.length===1?`${a0.year}年${a0.month}月`:`${a0.year}年${a0.month}月〜${b0.year}年${b0.month}月`;
+  const noteEl=document.getElementById('sh-period-note');
+  if(noteEl) noteEl.textContent=showAll
+    ?'全件表示（仕入契約日順）'
+    :`${plabel}・仕入契約日基準${outP.length?`（期間外 ${outP.length}件は非表示）`:''}`;
   let cntMikomi=0,cntKakutei=0,sumMikomi=0,sumKakutei=0;
-  const rows=data.map(it=>{
+  const rows=shown.map(it=>{
     const p=shiireProfit(it);
     if(p.kakutei){cntKakutei++;sumKakutei+=p.profit;} else {cntMikomi++;sumMikomi+=p.profit;}
     const badge=p.kakutei?'<span class="sh-badge kakutei">確定</span>':'<span class="sh-badge mikomi">見込み</span>';
+    const bkd=it.BuyKeiyakuDate?String(it.BuyKeiyakuDate).slice(0,10).replace(/-/g,'/'):'<span style="color:var(--text3);">未入力</span>';
     return `<tr>
       <td class="left">${it.Title||''}</td>
       <td class="left">${it.Tantosha||'—'}</td>
       <td>${it.Status||'—'} ${badge}</td>
+      <td>${bkd}</td>
       <td>¥${shFmt(shNum(it.BuyPrice))}</td>
       <td>¥${shFmt(shNum(it.Expenses))}</td>
       <td>¥${shFmt(p.sell)}</td>
@@ -1674,12 +1750,12 @@ function renderShiire(){
       </td>
     </tr>`;
   }).join('');
-  document.getElementById('sh-tbody').innerHTML=rows||'<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:20px;">まだ物件がありません。上のフォームから追加してください。</td></tr>';
-  document.getElementById('sh-tfoot').innerHTML=data.length?`<tr>
-     <td class="left" colspan="6">合計 ${data.length}件（見込み${cntMikomi}／確定${cntKakutei}）</td>
+  document.getElementById('sh-tbody').innerHTML=rows||`<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px;">${all.length?'この期間に仕入契約日が該当する物件はありません。「全件表示」で確認できます。':'まだ物件がありません。上のフォームから追加してください。'}</td></tr>`;
+  document.getElementById('sh-tfoot').innerHTML=shown.length?`<tr>
+     <td class="left" colspan="7">合計 ${shown.length}件（見込み${cntMikomi}／確定${cntKakutei}${noDate.length?`・日付未入力${noDate.length}`:''}）</td>
      <td style="font-weight:700;">¥${shFmt(sumMikomi+sumKakutei)}</td><td></td><td></td></tr>`:'';
   document.getElementById('shiire-cards').innerHTML=`
-    <div class="uri-card"><div class="lb">物件数</div><div class="vl">${data.length}</div></div>
+    <div class="uri-card"><div class="lb">物件数</div><div class="vl">${shown.length}</div></div>
     <div class="uri-card"><div class="lb">見込み粗利 合計</div><div class="vl">¥${shFmt(sumMikomi)}</div></div>
     <div class="uri-card"><div class="lb">確定粗利 合計</div><div class="vl">¥${shFmt(sumKakutei)}</div></div>
     <div class="uri-card"><div class="lb">粗利 総合計</div><div class="vl">¥${shFmt(sumMikomi+sumKakutei)}</div></div>`;
