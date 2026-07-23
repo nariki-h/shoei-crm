@@ -1820,10 +1820,10 @@ function renderShiire(){
      <td style="font-weight:700;color:${shownDiff<0?'#dc2626':'#15803d'};">${shownDiff>=0?'+':''}${yen(shownDiff).replace('¥-','−¥')}</td>
      <td></td></tr>`:'';
   document.getElementById('shiire-cards').innerHTML=`
-    <div class="uri-card"><div class="lb">仕入契約（見込み計上）</div><div class="vl">${buyRows.length}件</div><div class="lb" style="margin-top:2px;">見込み粗利 ${yen(mikomiSum)}</div></div>
-    <div class="uri-card"><div class="lb">販売決済（粗利確定）</div><div class="vl">${sellRows.length}件</div><div class="lb" style="margin-top:2px;">確定粗利 ${yen(kakuteiSum)}</div></div>
-    <div class="uri-card"><div class="lb">見込み→確定 差異</div><div class="vl" style="color:${diffSum<0?'#dc2626':'#15803d'};">${diffSum>=0?'+':''}${yen(diffSum).replace('¥-','−¥')}</div><div class="lb" style="margin-top:2px;">期間内決済 ${diffCnt}件分</div></div>
-    <div class="uri-card"><div class="lb">保有中（未決済・全期間）</div><div class="vl">${holding.length}件</div><div class="lb" style="margin-top:2px;">見込み粗利 ${yen(holdingMikomi)}</div></div>`;
+    <div class="uri-card"><div class="lb">見込み粗利 計上（仕入契約）</div><div class="vl">${yen(mikomiSum)}</div><div class="lb" style="margin-top:2px;">仕入契約 ${buyRows.length}件</div></div>
+    <div class="uri-card"><div class="lb">確定粗利（販売決済）</div><div class="vl">${yen(kakuteiSum)}</div><div class="lb" style="margin-top:2px;">販売決済 ${sellRows.length}件</div></div>
+    <div class="uri-card"><div class="lb">見込み→確定 差異</div><div class="vl" style="color:${diffCnt===0?'var(--text3)':diffSum<0?'#dc2626':'#15803d'};">${diffCnt===0?'—':(diffSum>=0?'+':'')+yen(diffSum).replace('¥-','−¥')}</div><div class="lb" style="margin-top:2px;">${diffCnt===0?'期間内の決済なし':`期間内決済 ${diffCnt}件分`}</div></div>
+    <div class="uri-card"><div class="lb">保有中の見込み粗利</div><div class="vl">${yen(holdingMikomi)}</div><div class="lb" style="margin-top:2px;">未決済 ${holding.length}件（全期間）</div></div>`;
 }
 
 // --- ドラッグ＆ドロップ配線 ---
