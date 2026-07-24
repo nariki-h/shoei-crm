@@ -1398,41 +1398,101 @@ function renderUriage(){
 }
 
 // ===== 個人別 通算成績（年度累計 vs 通期目標）＋部署ストック＋仕入確定粗利合算 =====
-let targetData=null;   // {担当者名: 通期目標額}
-const TARGETS_FALLBACK={'金光 善慶':60000000,'馬場 宏一':48000000,'村上 光南':12000000};
+// 目標データ：{name: {full: 通期額, h1: 上期額, h2: 下期額}}
+// 半期表示時は h1/h2 を使い、なければ通期÷2にフォールバック。
+let targetData=null;
+const TARGETS_FALLBACK={
+  '金光 善慶':{full:60000000,h1:30000000,h2:30000000},
+  '馬場 宏一':{full:48000000,h1:24000000,h2:24000000},
+  '村上 光南':{full:12000000,h1: 6000000,h2: 6000000},
+};
+const Q_MAP={'上期':'h1','下期':'h2','通期':'full','Q1':'q1','Q2':'q2','Q3':'q3','Q4':'q4'};
 async function loadTargets(){
   if(targetData) return targetData;
   try{
     const items=await spGetItems('目標値リスト');
     const map={};
     (items||[]).forEach(it=>{
-      // 氏名：担当者マスターの氏名と一致する文字列フィールドを探す（通常Title）
-      let name=null;
-      for(const v of Object.values(it)){
-        if(typeof v==='string'&&staffListCache.includes(v.trim())){name=v.trim();break;}
+      const name=(it.Tantosha||'').trim();
+      const q=Q_MAP[it.Quarter]||null;
+      const amt=Number(it.SalesTarget)||0;
+      if(!name||!q||!amt)return;
+      if(!map[name])map[name]={};
+      map[name][q]=amt;
+    });
+    // 半期未入力なら通期÷2で補完
+    Object.values(map).forEach(o=>{
+      if(o.full){
+        if(!o.h1)o.h1=Math.round(o.full/2);
+        if(!o.h2)o.h2=Math.round(o.full/2);
+      } else if(o.h1&&o.h2){
+        o.full=o.h1+o.h2;
       }
-      if(!name)return;
-      // 目標額：Id以外で最大の数値フィールド
-      let amt=0;
-      for(const [k,v] of Object.entries(it)){
-        if(k==='Id'||k==='ID')continue;
-        if(typeof v==='number'&&v>amt)amt=v;
-      }
-      if(amt>0)map[name]=amt;
     });
     targetData=Object.keys(map).length?map:TARGETS_FALLBACK;
     if(!Object.keys(map).length)console.warn('目標値リストから目標を読めなかったため既定値を使用します');
   }catch(e){ console.warn('目標値リスト読込失敗、既定値を使用:',e); targetData=TARGETS_FALLBACK; }
   return targetData;
 }
+// 半期判定：1=上期(4〜9月)、2=下期(10〜3月)
+function halfOfMonth(m){return (m>=4&&m<=9)?1:2;}
+function halfMonthsOf(fy,h){const a=[];if(h===1){for(let m=4;m<=9;m++)a.push({year:fy,month:m});}else{for(let m=10;m<=12;m++)a.push({year:fy,month:m});for(let m=1;m<=3;m++)a.push({year:fy+1,month:m});}return a;}
+
 function fyMonthsOf(fy){const a=[];for(let i=0;i<12;i++){const m=(3+i)%12+1;a.push({year:m>=4?fy:fy+1,month:m});}return a;}
-// 年度内の個人別集計：仲介＝AP33−ストック、仕入＝確定粗利（販売決済日基準）のみ合算
+// 期間内の個人別集計。basisで契約基準/入金基準を切替。
+// 仲介：契約基準はAP33を契約日、入金基準はAP33を決済日で計上。ストックは常に個人成績から除外。
+// 仕入：契約基準は仕入契約日で「見込み粗利」、入金基準は販売決済日で「確定粗利」のみ合算。
+function computeStats(basis,months){
+  const dateOfChukai=r=>basis==='kessai'?r.kessaiDate:r.keiyakuDate;
+  const stockOf=r=>Math.max(0,Math.min(r.stock||0,r.uriage||0));
+  const rows=(denpyoData||[]).filter(r=>inPeriod(dateOfChukai(r),months));
+  const per=new Map(); let stockTotal=0,stockBucho=0;
+  const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0});return per.get(k);};
+  rows.forEach(r=>{
+    const st=stockOf(r); stockTotal+=st;
+    if(TARGET_EXCLUDED_STAFF.has(r.staff))stockBucho+=st;
+    const o=ensure(r.staff); const own=r.uriage-st;
+    o.cnt++; o.chukai+=own; o.sou+=(r.honntai||r.sougaku||0);
+  });
+  (shiireData||[]).forEach(it=>{
+    const p=shiireProfit(it);
+    if(basis==='kessai'){
+      // 入金基準：確定粗利のみ
+      if(p.settled&&p.kakutei!=null&&inPeriod(it.SellKessaiDate,months)){
+        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.kakutei;
+      }
+    } else {
+      // 契約基準：仕入契約日で見込み粗利を計上
+      if(it.BuyKeiyakuDate&&inPeriod(it.BuyKeiyakuDate,months)){
+        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.mikomi;
+      }
+    }
+  });
+  return {per,stockTotal,stockBucho};
+}
+// 部署合計＝全担当合計（ストック含む＝AP33合計＋仕入分）
+function totalOfStats(stats){
+  let total=0;
+  stats.per.forEach(o=>total+=o.chukai+o.shiire);
+  total+=stats.stockTotal;  // 個人成績から除外したストックを部署合計に戻す
+  return total;
+}
+// チーム合計（Aチーム）＝チームメンバーの合計。ストックは含めない（部長ストックはチーム外）
+function teamTotalOfStats(stats,teamName){
+  let total=0;
+  stats.per.forEach((o,name)=>{
+    if(staffTeamMap[name]===teamName)total+=o.chukai+o.shiire;
+  });
+  return total;
+}
+// 既存のcomputeTsuusan（12ヶ月分・月別累計）は年度カード用に残す
+function fyMonthsOf(fy){const a=[];for(let i=0;i<12;i++){const m=(3+i)%12+1;a.push({year:m>=4?fy:fy+1,month:m});}return a;}
 function computeTsuusan(basis,fy){
   const fyMonths=fyMonthsOf(fy);
-  const dateOf=r=>basis==='kessai'?r.kessaiDate:r.keiyakuDate;
+  const dateOfChukai=r=>basis==='kessai'?r.kessaiDate:r.keiyakuDate;
   const stockOf=r=>Math.max(0,Math.min(r.stock||0,r.uriage||0));
   const monthIdx=d=>{const s=String(d||'');return fyMonths.findIndex(m=>s.startsWith(`${m.year}-${String(m.month).padStart(2,'0')}`));};
-  const rows=(denpyoData||[]).filter(r=>inPeriod(dateOf(r),fyMonths));
+  const rows=(denpyoData||[]).filter(r=>inPeriod(dateOfChukai(r),fyMonths));
   const per=new Map(); let stockTotal=0,stockBucho=0;
   const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,monthly:new Array(12).fill(0)});return per.get(k);};
   rows.forEach(r=>{
@@ -1440,13 +1500,20 @@ function computeTsuusan(basis,fy){
     if(TARGET_EXCLUDED_STAFF.has(r.staff))stockBucho+=st;
     const o=ensure(r.staff); const own=r.uriage-st;
     o.cnt++; o.chukai+=own; o.sou+=(r.honntai||r.sougaku||0);
-    const mi=monthIdx(dateOf(r)); if(mi>=0)o.monthly[mi]+=own;
+    const mi=monthIdx(dateOfChukai(r)); if(mi>=0)o.monthly[mi]+=own;
   });
   (shiireData||[]).forEach(it=>{
     const p=shiireProfit(it);
-    if(p.settled&&p.kakutei!=null&&inPeriod(it.SellKessaiDate,fyMonths)){
-      const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.kakutei;
-      const mi=monthIdx(it.SellKessaiDate); if(mi>=0)o.monthly[mi]+=p.kakutei;
+    if(basis==='kessai'){
+      if(p.settled&&p.kakutei!=null&&inPeriod(it.SellKessaiDate,fyMonths)){
+        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.kakutei;
+        const mi=monthIdx(it.SellKessaiDate); if(mi>=0)o.monthly[mi]+=p.kakutei;
+      }
+    } else {
+      if(it.BuyKeiyakuDate&&inPeriod(it.BuyKeiyakuDate,fyMonths)){
+        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.mikomi;
+        const mi=monthIdx(it.BuyKeiyakuDate); if(mi>=0)o.monthly[mi]+=p.mikomi;
+      }
     }
   });
   return {per,stockTotal,stockBucho,fyMonths};
@@ -1498,36 +1565,109 @@ function renderTsuusan(){
     <div style="font-size:10px;color:var(--text3);margin:-4px 0 8px;">仲介は部署ストックを除いた個人分、仕入は確定粗利のみ合算</div>
     <div style="display:grid;gap:8px;">${rowsHtml||'<div class="uri-empty">データなし</div>'}</div>
     ${stockTotal?`<div style="font-size:11px;color:var(--text3);margin-top:6px;">部署ストック（年度計）：${yen(stockTotal)}${stockBucho?`（うち部長案件 ${yen(stockBucho)}）`:''}</div>`:''}
-    ${tsuusanChart(per,targetData)}
+    ${achievementDashboard(fy)}
   `;
 }
-function tsuusanChart(per,targets){
-  const names=Object.keys(targets);
-  if(!names.length)return'';
-  const COLORS=['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed'];
-  const W=680,H=240,PL=56,PR=12,PT=12,PB=24;
-  const series=names.map((n,i)=>{
-    const mo=(per.get(n)||{monthly:new Array(12).fill(0)}).monthly;
-    let c=0; return {name:n,color:COLORS[i%COLORS.length],cum:mo.map(v=>c+=v)};
-  });
-  const maxY=Math.max(1,...series.map(s=>s.cum[11]||0),...names.map(n=>targets[n]||0));
-  const x=i=>PL+(W-PL-PR)*i/11;
-  const y=v=>PT+(H-PT-PB)*(1-v/maxY);
-  const lines=series.map(s=>{
-    const pts=s.cum.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    const t=targets[s.name]||0;
-    return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"/>`+
-      (t?`<line x1="${PL}" y1="${y(t).toFixed(1)}" x2="${W-PR}" y2="${y(t).toFixed(1)}" stroke="${s.color}" stroke-width="1" stroke-dasharray="4 3" opacity="0.5"/>`:'');
-  }).join('');
-  const labels=[...Array(12)].map((_,i)=>`<text x="${x(i).toFixed(1)}" y="${H-6}" font-size="9" text-anchor="middle" fill="#9ca3af">${(3+i)%12+1}月</text>`).join('');
-  const grid=[0.25,0.5,0.75,1].map(f=>`<line x1="${PL}" y1="${y(maxY*f).toFixed(1)}" x2="${W-PR}" y2="${y(maxY*f).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/><text x="${PL-4}" y="${(y(maxY*f)+3).toFixed(1)}" font-size="9" text-anchor="end" fill="#9ca3af">${man(maxY*f)}</text>`).join('');
-  const legend=series.map(s=>`<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:11px;"><span style="width:10px;height:3px;background:${s.color};display:inline-block;"></span>${s.name}</span>`).join('');
-  return `<div style="margin-top:10px;">
-    <div style="font-size:11px;color:var(--text3);margin-bottom:2px;">月別累計推移（点線＝各自の通期目標）</div>
-    <div>${legend}</div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-radius:8px;">${grid}${lines}${labels}</svg>
-  </div>`;
+// 半期目標に対する達成状況：左＝半期累計vs目標、右＝当月実績
+// 各行：部署／Aチーム／個人3人、それぞれ契約ベース・入金ベースの2本
+function achievementDashboard(fy){
+  const now=new Date();
+  const nowFy=fyYear(now.getFullYear(),now.getMonth()+1);
+  const nowH=halfOfMonth(now.getMonth()+1);
+  // 表示中の年度に対応する半期。過年度なら下期（＝年度全体を含む）、当年度なら今日の半期、来年度なら上期
+  const h=(fy<nowFy)?2:(fy>nowFy?1:nowH);
+  const hMonths=halfMonthsOf(fy,h);
+  const curMonths=(fy===nowFy)?[{year:now.getFullYear(),month:now.getMonth()+1}]:[hMonths[hMonths.length-1]];
+  const halfLabel=h===1?`${fy}年度 上期（4〜9月）`:`${fy}年度 下期（10〜3月）`;
+  const curLabel=curMonths[0]?`${curMonths[0].year}年${curMonths[0].month}月`:'';
+
+  // 契約/入金それぞれで2種類の統計
+  const halfK=computeStats('keiyaku',hMonths), halfN=computeStats('kessai',hMonths);
+  const curK =computeStats('keiyaku',curMonths), curN=computeStats('kessai',curMonths);
+
+  // 行定義：部署／Aチーム／個人3名（TARGET_EXCLUDED_STAFFは除外＝成木は個人行なし）
+  const teamName='A';
+  const individuals=[...targetData?Object.keys(targetData):[]]
+    .filter(n=>!TARGET_EXCLUDED_STAFF.has(n)&&n!=='部署'&&n!==`${teamName}チーム`&&n!=='Aチーム')
+    .sort((a,b)=>(targetData[b]?.h1||0)+(targetData[b]?.h2||0)-(targetData[a]?.h1||0)-(targetData[a]?.h2||0));
+
+  // 目標取得：部署・チームは目標値リストに'部署'/'Aチーム'として入っていれば使う、なければ「未設定」
+  const targetOf=(rowKey,h)=>{
+    if(!targetData)return 0;
+    const key=h===1?'h1':'h2';
+    if(rowKey==='部署') return targetData['部署']?.[key]||0;
+    if(rowKey==='Aチーム') return targetData['Aチーム']?.[key]||0;
+    return targetData[rowKey]?.[key]||0;
+  };
+  const halfActualOf=(rowKey,stats)=>{
+    if(rowKey==='部署') return totalOfStats(stats);
+    if(rowKey==='Aチーム') return teamTotalOfStats(stats,teamName);
+    const o=stats.per.get(rowKey);
+    return o?(o.chukai+o.shiire):0;
+  };
+
+  const rowKeys=['部署','Aチーム',...individuals];
+  // 左右の最大値（バー長の基準）：目標と実績の大きい方
+  const leftMax=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),halfActualOf(k,halfK),halfActualOf(k,halfN))));
+  const rightMax=Math.max(1,...rowKeys.map(k=>Math.max(halfActualOf(k,curK),halfActualOf(k,curN))));
+
+  const barCell=(actualK,actualN,target,maxV,showTarget)=>{
+    const wK=Math.min(100,actualK/maxV*100);
+    const wN=Math.min(100,actualN/maxV*100);
+    const tgtLine=(showTarget&&target>0)?`<div style="position:absolute;top:0;bottom:0;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;opacity:0.65;"></div>`:'';
+    const pctK=target?(actualK/target*100).toFixed(1)+'%':'';
+    const pctN=target?(actualN/target*100).toFixed(1)+'%':'';
+    return `
+    <div style="display:grid;grid-template-columns:34px 1fr 76px;gap:6px;align-items:center;margin:2px 0;">
+      <span style="font-size:10px;color:var(--text3);">契約</span>
+      <div style="position:relative;height:14px;background:var(--border,#e5e7eb);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${wK.toFixed(1)}%;background:#2563eb;"></div>${tgtLine}
+      </div>
+      <span style="font-size:11px;text-align:right;">${yen(actualK)}${pctK?`<span style="color:var(--text3);font-size:10px;"> ${pctK}</span>`:''}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:34px 1fr 76px;gap:6px;align-items:center;margin:2px 0;">
+      <span style="font-size:10px;color:var(--text3);">入金</span>
+      <div style="position:relative;height:14px;background:var(--border,#e5e7eb);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${wN.toFixed(1)}%;background:#16a34a;"></div>${tgtLine}
+      </div>
+      <span style="font-size:11px;text-align:right;">${yen(actualN)}${pctN?`<span style="color:var(--text3);font-size:10px;"> ${pctN}</span>`:''}</span>
+    </div>`;
+  };
+
+  const rowHtml=(rowKey)=>{
+    const tgt=targetOf(rowKey,h);
+    const aK=halfActualOf(rowKey,halfK), aN=halfActualOf(rowKey,halfN);
+    const cK=halfActualOf(rowKey,curK), cN=halfActualOf(rowKey,curN);
+    const tgtStr=tgt?`目標 ${yen(tgt)}`:'目標未設定';
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:8px;">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <b>${rowKey}</b><span style="font-size:10px;color:var(--text3);">${tgtStr}</span>
+        </div>
+        ${barCell(aK,aN,tgt,leftMax,true)}
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--text3);text-align:right;">当月実績</div>
+        ${barCell(cK,cN,0,rightMax,false)}
+      </div>
+    </div>`;
+  };
+
+  return `
+    <div class="section-title" style="margin-top:20px;">達成状況ダッシュボード</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:6px;font-size:11px;color:var(--text3);">
+      <div>左：${halfLabel}累計 vs 半期目標（黒線＝目標）</div>
+      <div style="text-align:right;">右：${curLabel}実績</div>
+    </div>
+    <div style="font-size:10px;color:var(--text3);margin-bottom:8px;">
+      <span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;"><span style="width:10px;height:8px;background:#2563eb;display:inline-block;border-radius:2px;"></span>契約ベース（契約日で計上）</span>
+      <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:10px;height:8px;background:#16a34a;display:inline-block;border-radius:2px;"></span>入金ベース（決済日で計上）</span>
+    </div>
+    ${rowKeys.map(rowHtml).join('')}
+  `;
 }
+
+
 
 function switchTab(name){
   ['kpi','uriage','shiire'].forEach(t=>{
