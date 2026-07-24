@@ -1482,22 +1482,23 @@ function computeStats(basis,months){
   return {per,stockTotal,stockBucho};
 }
 // 部署合計＝全担当合計（ストック含む＝AP33合計＋仕入分）
+// 部署合計 内訳付き：{chukai, shiire, total} を返す。
+// ストックは仲介側に足す（部の売上として計上した部分は仲介AP33の性質）
 function totalOfStats(stats){
-  let total=0;
-  stats.per.forEach(o=>total+=o.chukai+o.shiire);
-  total+=stats.stockTotal;  // 個人成績から除外したストックを部署合計に戻す
-  return total;
+  let chukai=0,shiire=0;
+  stats.per.forEach(o=>{chukai+=o.chukai;shiire+=o.shiire;});
+  chukai+=stats.stockTotal;
+  return {chukai,shiire,total:chukai+shiire};
 }
-// チーム合計（Aチーム）＝チームメンバーの合計。ストックは含めない（部長ストックはチーム外）
+// チーム合計 内訳付き：{chukai, shiire, total}。ストックは含めない（部長ストックはチーム外）
 function teamTotalOfStats(stats,teamName){
-  // staffTeamMap自体が表記ゆれを持つため、正規化キーで再構築してから照合
   const normMap={};
   Object.keys(staffTeamMap||{}).forEach(k=>{normMap[normName(k)]=staffTeamMap[k];});
-  let total=0;
+  let chukai=0,shiire=0;
   stats.per.forEach((o,name)=>{
-    if(normMap[normName(name)]===teamName)total+=o.chukai+o.shiire;
+    if(normMap[normName(name)]===teamName){chukai+=o.chukai;shiire+=o.shiire;}
   });
-  return total;
+  return {chukai,shiire,total:chukai+shiire};
 }
 // 既存のcomputeTsuusan（12ヶ月分・月別累計）は年度カード用に残す
 function fyMonthsOf(fy){const a=[];for(let i=0;i<12;i++){const m=(3+i)%12+1;a.push({year:m>=4?fy:fy+1,month:m});}return a;}
@@ -1573,80 +1574,79 @@ function achievementDashboard(fy){
     if(rowKey==='Aチーム') return targetData['Aチーム']?.m||0;
     return targetData[rowKey]?.m||0;
   };
+  // 内訳付きで実績を返す：{chukai, shiire, total}
   const actualOf=(rowKey,stats)=>{
     if(rowKey==='部署') return totalOfStats(stats);
     if(rowKey==='Aチーム') return teamTotalOfStats(stats,teamName);
     const o=stats.per.get(rowKey);
-    return o?(o.chukai+o.shiire):0;
+    return o?{chukai:o.chukai,shiire:o.shiire,total:o.chukai+o.shiire}:{chukai:0,shiire:0,total:0};
   };
   const rowKeys=['部署','Aチーム',...individuals];
 
-  // ---------- セクション①：半期達成率（左＝契約ベース、右＝入金ベース）----------
-  const halfMaxK=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfK))));
-  const halfMaxN=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfN))));
-  const halfBar=(actual,target,maxV,color)=>{
-    const w=Math.min(100,actual/maxV*100);
-    const tLine=target>0?`<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;"></div>`:'';
-    const pct=target?(actual/target*100):null;
+  // 色定義：契約系＝青系（濃=仲介／淡=仕入）、入金系＝緑系（濃=仲介／淡=仕入）
+  const C={contractC:'#2563eb',contractS:'#60a5fa',cashC:'#16a34a',cashS:'#86efac'};
+
+  // 積み上げバー描画：仲介→仕入の順で左から積む。目標線と達成率%付き。
+  const stackBar=(a,target,maxV,colorChukai,colorShiire)=>{
+    const wC=Math.min(100,a.chukai/maxV*100);
+    const wS=Math.min(100-wC,a.shiire/maxV*100);
+    const tLine=target>0?`<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;z-index:2;"></div>`:'';
+    const pct=target?(a.total/target*100):null;
     const pctColor=pct==null?'':(pct>=100?'#16a34a':(pct>=70?'#d97706':'#dc2626'));
+    const tipC=a.chukai?`title="仲介 ${yen(a.chukai)}"`:'';
+    const tipS=a.shiire?`title="仕入 ${yen(a.shiire)}"`:'';
     return `<div style="display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;">
-      <div style="position:relative;height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;">
-        <div style="height:100%;width:${w.toFixed(1)}%;background:${color};"></div>${tLine}
+      <div style="position:relative;height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;display:flex;">
+        <div ${tipC} style="height:100%;width:${wC.toFixed(1)}%;background:${colorChukai};"></div>
+        <div ${tipS} style="height:100%;width:${wS.toFixed(1)}%;background:${colorShiire};"></div>
+        ${tLine}
       </div>
       <div style="text-align:right;">
-        <b style="font-size:15px;">${yen(actual)}</b>
+        <b style="font-size:15px;">${yen(a.total)}</b>
         ${pct!=null?`<div style="font-size:12px;color:${pctColor};font-weight:700;">${pct.toFixed(1)}%</div>`:'<div style="font-size:10px;color:var(--text3);">目標未設定</div>'}
       </div>
     </div>`;
   };
+
+  // ---------- セクション①：半期達成率（左＝契約ベース、右＝入金ベース）----------
+  const halfMaxK=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfK).total)));
+  const halfMaxN=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfN).total)));
   const halfRow=(rowKey)=>{
     const tgt=targetOf(rowKey,h);
     const aK=actualOf(rowKey,halfK), aN=actualOf(rowKey,halfN);
+    const detail=(a)=>a.shiire?`<div style="font-size:9px;color:var(--text3);">仲 ${yen(a.chukai)} ／ 仕 ${yen(a.shiire)}</div>`:'';
     return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
       <div>
         <b>${rowKey}</b>
         <div style="font-size:10px;color:var(--text3);">${tgt?`目標 ${yen(tgt)}`:'目標未設定'}</div>
       </div>
-      ${halfBar(aK,tgt,halfMaxK,'#2563eb')}
-      ${halfBar(aN,tgt,halfMaxN,'#16a34a')}
+      <div>${stackBar(aK,tgt,halfMaxK,C.contractC,C.contractS)}${detail(aK)}</div>
+      <div>${stackBar(aN,tgt,halfMaxN,C.cashC,C.cashS)}${detail(aN)}</div>
     </div>`;
   };
 
   // ---------- セクション②：当月実績（月次目標との対比）----------
-  const curMaxK=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curK))));
-  const curMaxN=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curN))));
-  const curBar=(actual,target,maxV,color)=>{
-    const w=Math.min(100,actual/maxV*100);
-    const tLine=target>0?`<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;"></div>`:'';
-    const pct=target?(actual/target*100):null;
-    const pctColor=pct==null?'':(pct>=100?'#16a34a':(pct>=70?'#d97706':'#dc2626'));
-    return `<div style="display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;">
-      <div style="position:relative;height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;">
-        <div style="height:100%;width:${w.toFixed(1)}%;background:${color};"></div>${tLine}
-      </div>
-      <div style="text-align:right;">
-        <b style="font-size:15px;">${yen(actual)}</b>
-        ${pct!=null?`<div style="font-size:12px;color:${pctColor};font-weight:700;">${pct.toFixed(1)}%</div>`:'<div style="font-size:10px;color:var(--text3);">目標未設定</div>'}
-      </div>
-    </div>`;
-  };
+  const curMaxK=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curK).total)));
+  const curMaxN=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curN).total)));
   const curRow=(rowKey)=>{
     const tgt=monthTargetOf(rowKey);
     const aK=actualOf(rowKey,curK), aN=actualOf(rowKey,curN);
+    const detail=(a)=>a.shiire?`<div style="font-size:9px;color:var(--text3);">仲 ${yen(a.chukai)} ／ 仕 ${yen(a.shiire)}</div>`:'';
     return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
       <div>
         <b>${rowKey}</b>
         <div style="font-size:10px;color:var(--text3);">${tgt?`月目標 ${yen(tgt)}`:'目標未設定'}</div>
       </div>
-      ${curBar(aK,tgt,curMaxK,'#2563eb')}
-      ${curBar(aN,tgt,curMaxN,'#16a34a')}
+      <div>${stackBar(aK,tgt,curMaxK,C.contractC,C.contractS)}${detail(aK)}</div>
+      <div>${stackBar(aN,tgt,curMaxN,C.cashC,C.cashS)}${detail(aN)}</div>
     </div>`;
   };
 
+  const swatch=(color,label)=>`<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:12px;height:8px;background:${color};display:inline-block;border-radius:2px;"></span>${label}</span>`;
   const legendHalf=`<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:0 12px;font-size:11px;color:var(--text3);margin-bottom:4px;">
     <div></div>
-    <div style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:#2563eb;display:inline-block;border-radius:2px;"></span>契約ベース</div>
-    <div style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:#16a34a;display:inline-block;border-radius:2px;"></span>入金ベース</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">契約：${swatch(C.contractC,'仲介')} ${swatch(C.contractS,'仕入')}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">入金：${swatch(C.cashC,'仲介')} ${swatch(C.cashS,'仕入')}</div>
   </div>`;
 
   return `
