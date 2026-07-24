@@ -374,7 +374,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
        <div class="uri-table-wrap">
          <table class="uri">
            <thead><tr>
-             <th class="left">担当者</th><th>契約件数</th><th>売上計上金額</th><th>構成比</th><th>取引総額</th>
+             <th class="left">担当者</th><th>契約件数</th><th>売上計上金額</th><th>取引総額</th>
            </tr></thead>
            <tbody id="uri-staff-tbody"></tbody>
            <tfoot id="uri-staff-tfoot"></tfoot>
@@ -387,13 +387,15 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
        <div class="uri-table-wrap">
          <table class="uri">
            <thead><tr>
-             <th class="left">チーム</th><th>契約件数</th><th>売上計上金額</th><th>構成比</th><th>取引総額</th>
+             <th class="left">チーム</th><th>契約件数</th><th>売上計上金額</th><th>取引総額</th>
            </tr></thead>
            <tbody id="uri-team-tbody"></tbody>
            <tfoot id="uri-team-tfoot"></tfoot>
          </table>
        </div>
      </div>
+
+     <div id="uri-tsuusan"></div>
 
      <div>
        <div class="section-title">契約明細</div>
@@ -1207,6 +1209,11 @@ function parseDenpyo(buf,fileName,updated,folder){
     if(v('AJ'+r)) commission.push({role:'部',  name:v('AJ'+r),rate:n('AN'+r),amount:n('AR'+r)});
   }
 
+  // 部署ストック（AZ列 36〜38行、合計はAZ39）
+  // 個人が動いて決めた成績とは別枠で、誰のインセン対象にもならない計上分。
+  // 部長案件（誰も動いていない）や業販（課員がほぼ動いていない）がここに入る。
+  const stock=n('AZ39')||(n('AZ36')+n('AZ37')+n('AZ38'));
+
   const sei=v('AQ3');
   // 課長は所属チーム長(BA3)ではなく、歩合欄(T36〜/X36〜)の配分を正とする。
   // 通常は所属チーム長1名に全額（割合1）だが、ヘルプ時は複数課長へ按分される想定。
@@ -1225,7 +1232,7 @@ function parseDenpyo(buf,fileName,updated,folder){
     shozai:v('I7')||'', jukyo:v('I8')||'',
     urinushi:v('I14')||'', kainushi:v('I16')||'',
     honntai:n('O21'), sougaku:n('O23'),
-    feeZei:n('AN31'), feeIn:n('AN32'), uriage:n('AP33'),
+    feeZei:n('AN31'), feeIn:n('AN32'), uriage:n('AP33'), stock,
     commission,
     loanBank:v('Q41')||'', loanAmount:n('AT41'),
     shouninDate:d('I42'), kaijoDate:d('W42'),
@@ -1304,59 +1311,63 @@ function renderUriage(){
     document.getElementById('uri-staff-tfoot').innerHTML='';
     const _tb=document.getElementById('uri-team-tbody'); if(_tb) _tb.innerHTML='';
     const _tf=document.getElementById('uri-team-tfoot'); if(_tf) _tf.innerHTML='';
+    const _ts=document.getElementById('uri-tsuusan'); if(_ts) _ts.innerHTML='';
     return;
   }
 
   const basis=document.getElementById('uri-basis').value;
   const months=getMonthRange();
   const rows=denpyoData.filter(r=>inPeriod(basis==='kessai'?r.kessaiDate:r.keiyakuDate,months));
+  // 部署ストック（AZ39）：売上には含むが、個人の成績には含めない別枠
+  const stockOf=r=>Math.max(0,Math.min(r.stock||0,r.uriage||0));
 
-  // サマリーカード
+  // サマリーカード：件数と売上が主役。取引総額・平均単価・ストックは小さく。
   const totUri=rows.reduce((a,r)=>a+r.uriage,0);
   const totSou=rows.reduce((a,r)=>a+r.sougaku,0);
+  const totStock=rows.reduce((a,r)=>a+stockOf(r),0);
   const avg=rows.length?Math.round(totUri/rows.length):0;
   document.getElementById('uri-cards').innerHTML=`
     <div class="uri-card"><div class="lb">契約件数</div><div class="vl">${rows.length}<span style="font-size:13px;font-weight:400;color:var(--text3)"> 件</span></div><div class="sb">${basis==='kessai'?'決済日':'契約日'}基準</div></div>
     <div class="uri-card"><div class="lb">売上計上金額</div><div class="vl" style="color:var(--green)">${man(totUri)}</div><div class="sb">${yen(totUri)}</div></div>
-    <div class="uri-card"><div class="lb">取引総額</div><div class="vl">${man(totSou)}</div><div class="sb">${yen(totSou)}</div></div>
-    <div class="uri-card"><div class="lb">平均単価</div><div class="vl">${man(avg)}</div><div class="sb">1契約あたり</div></div>`;
+    <div class="uri-card"><div class="lb">取引総額 / 平均単価</div><div class="sb" style="margin-top:6px;">取引総額 ${man(totSou)}</div><div class="sb">平均単価 ${man(avg)}</div></div>
+    <div class="uri-card"><div class="lb">部署ストック（期間内）</div><div class="sb" style="margin-top:6px;font-size:14px;font-weight:600;">${totStock?yen(totStock):'—'}</div><div class="sb">個人成績には含まれません</div></div>`;
 
-  // 担当者別
+  // 担当者別：個人の売上＝AP33−部署ストック。ストック分は別行に小さく。
   const by=new Map();
   rows.forEach(r=>{
+    const st=stockOf(r);
     const k=r.staff;
-    if(!by.has(k)) by.set(k,{cnt:0,uri:0,sou:0});
-    const o=by.get(k); o.cnt++; o.uri+=r.uriage; o.sou+=r.sougaku;
+    if(!by.has(k)) by.set(k,{cnt:0,uri:0,sou:0,stock:0});
+    const o=by.get(k); o.cnt++; o.uri+=(r.uriage-st); o.sou+=r.sougaku; o.stock+=st;
   });
   const arr=[...by.entries()].sort((a,b)=>b[1].uri-a[1].uri);
-  document.getElementById('uri-staff-tbody').innerHTML=arr.length?arr.map(([k,o])=>`
-    <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td><td>${yen(o.uri)}</td>
-    <td>${totUri?Math.round(o.uri/totUri*100):0}%</td><td>${yen(o.sou)}</td></tr>`).join('')
-    :'<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>';
+  document.getElementById('uri-staff-tbody').innerHTML=(arr.length?arr.map(([k,o])=>`
+    <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td>
+    <td>${yen(o.uri)}${o.stock?`<div style="font-size:10px;color:var(--text3);">＋ストック ${yen(o.stock)}</div>`:''}</td>
+    <td>${yen(o.sou)}</td></tr>`).join('')
+    :'<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>')
+    +(totStock?`<tr style="color:var(--text3);"><td class="left" style="font-size:11px;">（部署ストック計・個人成績外）</td><td></td><td style="font-size:11px;">${yen(totStock)}</td><td></td></tr>`:'');
   document.getElementById('uri-staff-tfoot').innerHTML=arr.length?
-    `<tr><td class="left">合計</td><td>${rows.length}</td><td>${yen(totUri)}</td><td>100%</td><td>${yen(totSou)}</td></tr>`:'';
+    `<tr><td class="left">合計</td><td>${rows.length}</td><td>${yen(totUri)}</td><td>${yen(totSou)}</td></tr>`:'';
 
-  // チーム別：担当者マスターのチーム列（staffTeamMap）で担当者→チームを判定。
-  // チーム未設定の担当（成木/CO/その他）は「チーム外」としてまとめる。日々の達成状況把握用に
-  // 課長の営業分も含めた素直な合計（=そのチーム全員の売上合計）を出す。
+  // チーム別：チーム数字は全額（課員のストックも含む）。
+  // 部長（成木）はチーム無し＝「チーム外」に入るため、部長案件のストックは自動的にチームに乗らない。
   const byTeam=new Map();
   rows.forEach(r=>{
     const team=staffTeamMap[r.staff] ? `${staffTeamMap[r.staff]}チーム` : 'チーム外';
     if(!byTeam.has(team)) byTeam.set(team,{cnt:0,uri:0,sou:0});
     const o=byTeam.get(team); o.cnt++; o.uri+=r.uriage; o.sou+=r.sougaku;
   });
-  // チーム名で並べ、「チーム外」は最後に回す
   const teamArr=[...byTeam.entries()].sort((a,b)=>{
     if(a[0]==='チーム外') return 1;
     if(b[0]==='チーム外') return -1;
     return a[0].localeCompare(b[0],'ja');
   });
   document.getElementById('uri-team-tbody').innerHTML=teamArr.length?teamArr.map(([k,o])=>`
-    <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td><td>${yen(o.uri)}</td>
-    <td>${totUri?Math.round(o.uri/totUri*100):0}%</td><td>${yen(o.sou)}</td></tr>`).join('')
-    :'<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>';
+    <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td><td>${yen(o.uri)}</td><td>${yen(o.sou)}</td></tr>`).join('')
+    :'<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>';
   document.getElementById('uri-team-tfoot').innerHTML=teamArr.length?
-    `<tr><td class="left">合計</td><td>${rows.length}</td><td>${yen(totUri)}</td><td>100%</td><td>${yen(totSou)}</td></tr>`:'';
+    `<tr><td class="left">合計</td><td>${rows.length}</td><td>${yen(totUri)}</td><td>${yen(totSou)}</td></tr>`:'';
 
   // 明細
   document.getElementById('uri-detail').innerHTML = rows.length? `
@@ -1371,7 +1382,7 @@ function renderUriage(){
           <td class="left"><span class="pill">${r.no||'未記入'}</span></td>
           <td class="left">${r.keiyakuDate||'-'}</td>
           <td class="left">${r.kessaiDate||'-'}</td>
-          <td class="left">${r.staff}</td>
+          <td class="left">${r.staff}${stockOf(r)?'<div style="font-size:9px;color:var(--text3);">ストック</div>':''}</td>
           <td class="left" title="${(r.shozai||'').replace(/"/g,'')}">${r.jukyo||r.shozai||'-'}<br><span style="font-size:10px;color:var(--text3)">${r.bukkenType||''}</span></td>
           <td class="left">${r.urinushi||'-'}</td>
           <td class="left">${r.kainushi||'-'}</td>
@@ -1382,9 +1393,142 @@ function renderUriage(){
         </tr>`).join('')}</tbody>
     </table></div>`
     : '<div class="uri-empty">この期間に該当する契約はありません</div>';
+
+  renderTsuusan();
 }
 
-// タブ切替
+// ===== 個人別 通算成績（年度累計 vs 通期目標）＋部署ストック＋仕入確定粗利合算 =====
+let targetData=null;   // {担当者名: 通期目標額}
+const TARGETS_FALLBACK={'金光 善慶':60000000,'馬場 宏一':48000000,'村上 光南':12000000};
+async function loadTargets(){
+  if(targetData) return targetData;
+  try{
+    const items=await spGetItems('目標値リスト');
+    const map={};
+    (items||[]).forEach(it=>{
+      // 氏名：担当者マスターの氏名と一致する文字列フィールドを探す（通常Title）
+      let name=null;
+      for(const v of Object.values(it)){
+        if(typeof v==='string'&&staffListCache.includes(v.trim())){name=v.trim();break;}
+      }
+      if(!name)return;
+      // 目標額：Id以外で最大の数値フィールド
+      let amt=0;
+      for(const [k,v] of Object.entries(it)){
+        if(k==='Id'||k==='ID')continue;
+        if(typeof v==='number'&&v>amt)amt=v;
+      }
+      if(amt>0)map[name]=amt;
+    });
+    targetData=Object.keys(map).length?map:TARGETS_FALLBACK;
+    if(!Object.keys(map).length)console.warn('目標値リストから目標を読めなかったため既定値を使用します');
+  }catch(e){ console.warn('目標値リスト読込失敗、既定値を使用:',e); targetData=TARGETS_FALLBACK; }
+  return targetData;
+}
+function fyMonthsOf(fy){const a=[];for(let i=0;i<12;i++){const m=(3+i)%12+1;a.push({year:m>=4?fy:fy+1,month:m});}return a;}
+// 年度内の個人別集計：仲介＝AP33−ストック、仕入＝確定粗利（販売決済日基準）のみ合算
+function computeTsuusan(basis,fy){
+  const fyMonths=fyMonthsOf(fy);
+  const dateOf=r=>basis==='kessai'?r.kessaiDate:r.keiyakuDate;
+  const stockOf=r=>Math.max(0,Math.min(r.stock||0,r.uriage||0));
+  const monthIdx=d=>{const s=String(d||'');return fyMonths.findIndex(m=>s.startsWith(`${m.year}-${String(m.month).padStart(2,'0')}`));};
+  const rows=(denpyoData||[]).filter(r=>inPeriod(dateOf(r),fyMonths));
+  const per=new Map(); let stockTotal=0,stockBucho=0;
+  const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,monthly:new Array(12).fill(0)});return per.get(k);};
+  rows.forEach(r=>{
+    const st=stockOf(r); stockTotal+=st;
+    if(TARGET_EXCLUDED_STAFF.has(r.staff))stockBucho+=st;
+    const o=ensure(r.staff); const own=r.uriage-st;
+    o.cnt++; o.chukai+=own; o.sou+=(r.honntai||r.sougaku||0);
+    const mi=monthIdx(dateOf(r)); if(mi>=0)o.monthly[mi]+=own;
+  });
+  (shiireData||[]).forEach(it=>{
+    const p=shiireProfit(it);
+    if(p.settled&&p.kakutei!=null&&inPeriod(it.SellKessaiDate,fyMonths)){
+      const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.kakutei;
+      const mi=monthIdx(it.SellKessaiDate); if(mi>=0)o.monthly[mi]+=p.kakutei;
+    }
+  });
+  return {per,stockTotal,stockBucho,fyMonths};
+}
+function renderTsuusan(){
+  const el=document.getElementById('uri-tsuusan'); if(!el)return;
+  if(!denpyoData){el.innerHTML='';return;}
+  if(!targetData){loadTargets().then(()=>renderTsuusan());return;}
+  const basis=document.getElementById('uri-basis').value;
+  const m0=getMonthRange()[0];
+  const fy=fyYear(m0.year,m0.month);
+  const {per,stockTotal,stockBucho}=computeTsuusan(basis,fy);
+  // 年度経過率（過去年度=100%、未来=0%、当年度=経過月/12）
+  const now=new Date(); const nowFy=fyYear(now.getFullYear(),now.getMonth()+1);
+  const elapse=fy<nowFy?1:(fy>nowFy?0:(fyIndex(now.getMonth()+1)+1)/12);
+  // 表示順：目標保有者（目標額降順）→その他（実績降順）
+  const withT=Object.keys(targetData).sort((a,b)=>targetData[b]-targetData[a]);
+  const others=[...per.keys()].filter(n=>!targetData[n]&&n&&n!=='—'&&!EXCLUDED_STAFF.has(n))
+    .sort((a,b)=>{const A=per.get(a),B=per.get(b);return (B.chukai+B.shiire)-(A.chukai+A.shiire);});
+  const rowsHtml=[...withT,...others].map(name=>{
+    const o=per.get(name)||{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,monthly:new Array(12).fill(0)};
+    const total=o.chukai+o.shiire;
+    const tgt=targetData[name]||0;
+    const pct=tgt?total/tgt:null;
+    const dealCnt=o.cnt+o.shiireCnt;
+    const avgT=dealCnt?Math.round(total/dealCnt):0;
+    const bar=tgt?`
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+        <div style="flex:1;height:8px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;position:relative;">
+          <div style="height:100%;width:${Math.min(100,pct*100).toFixed(1)}%;background:${pct>=elapse?'#16a34a':(pct>=elapse*0.7?'#d97706':'#dc2626')};"></div>
+          <div style="position:absolute;top:0;bottom:0;left:${Math.min(99.5,elapse*100).toFixed(1)}%;width:2px;background:var(--text3,#9ca3af);"></div>
+        </div>
+        <div style="font-weight:700;min-width:58px;text-align:right;font-size:15px;">${(pct*100).toFixed(1)}%</div>
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px;">目標 ${yen(tgt)}（縦線＝年度経過 ${(elapse*100).toFixed(0)}%）</div>`
+      :`<div style="font-size:10px;color:var(--text3);margin-top:4px;">目標未設定</div>`;
+    return `<div style="padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px;">
+        <b>${name}</b>
+        <span><b style="font-size:17px;">${o.cnt}件</b>${o.shiireCnt?`<span style="font-size:11px;color:var(--text3);">＋仕入${o.shiireCnt}件</span>`:''}　<b style="font-size:17px;color:var(--green,#16a34a);">${yen(total)}</b></span>
+      </div>
+      ${o.shiire?`<div style="font-size:10px;color:var(--text3);">内訳：仲介 ${yen(o.chukai)} ／ 仕入確定粗利 ${yen(o.shiire)}</div>`:''}
+      ${bar}
+      <div style="font-size:10px;color:var(--text3);margin-top:2px;">取扱高 ${yen(o.sou)} ・ 平均単価 ${yen(avgT)}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML=`
+    <div class="section-title" style="margin-top:16px;">個人別 通算成績（${fy}年度累計・${basis==='kessai'?'決済日':'契約日'}基準）</div>
+    <div style="font-size:10px;color:var(--text3);margin:-4px 0 8px;">仲介は部署ストックを除いた個人分、仕入は確定粗利のみ合算</div>
+    <div style="display:grid;gap:8px;">${rowsHtml||'<div class="uri-empty">データなし</div>'}</div>
+    ${stockTotal?`<div style="font-size:11px;color:var(--text3);margin-top:6px;">部署ストック（年度計）：${yen(stockTotal)}${stockBucho?`（うち部長案件 ${yen(stockBucho)}）`:''}</div>`:''}
+    ${tsuusanChart(per,targetData)}
+  `;
+}
+function tsuusanChart(per,targets){
+  const names=Object.keys(targets);
+  if(!names.length)return'';
+  const COLORS=['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed'];
+  const W=680,H=240,PL=56,PR=12,PT=12,PB=24;
+  const series=names.map((n,i)=>{
+    const mo=(per.get(n)||{monthly:new Array(12).fill(0)}).monthly;
+    let c=0; return {name:n,color:COLORS[i%COLORS.length],cum:mo.map(v=>c+=v)};
+  });
+  const maxY=Math.max(1,...series.map(s=>s.cum[11]||0),...names.map(n=>targets[n]||0));
+  const x=i=>PL+(W-PL-PR)*i/11;
+  const y=v=>PT+(H-PT-PB)*(1-v/maxY);
+  const lines=series.map(s=>{
+    const pts=s.cum.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const t=targets[s.name]||0;
+    return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"/>`+
+      (t?`<line x1="${PL}" y1="${y(t).toFixed(1)}" x2="${W-PR}" y2="${y(t).toFixed(1)}" stroke="${s.color}" stroke-width="1" stroke-dasharray="4 3" opacity="0.5"/>`:'');
+  }).join('');
+  const labels=[...Array(12)].map((_,i)=>`<text x="${x(i).toFixed(1)}" y="${H-6}" font-size="9" text-anchor="middle" fill="#9ca3af">${(3+i)%12+1}月</text>`).join('');
+  const grid=[0.25,0.5,0.75,1].map(f=>`<line x1="${PL}" y1="${y(maxY*f).toFixed(1)}" x2="${W-PR}" y2="${y(maxY*f).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/><text x="${PL-4}" y="${(y(maxY*f)+3).toFixed(1)}" font-size="9" text-anchor="end" fill="#9ca3af">${man(maxY*f)}</text>`).join('');
+  const legend=series.map(s=>`<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:11px;"><span style="width:10px;height:3px;background:${s.color};display:inline-block;"></span>${s.name}</span>`).join('');
+  return `<div style="margin-top:10px;">
+    <div style="font-size:11px;color:var(--text3);margin-bottom:2px;">月別累計推移（点線＝各自の通期目標）</div>
+    <div>${legend}</div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-radius:8px;">${grid}${lines}${labels}</svg>
+  </div>`;
+}
+
 function switchTab(name){
   ['kpi','uriage','shiire'].forEach(t=>{
     const btn=document.getElementById('tab-'+t);
@@ -1393,6 +1537,7 @@ function switchTab(name){
     if(pg) pg.style.display=(t===name)?'flex':'none';
   });
   if(name==='uriage'&&denpyoData===null) loadDenpyo();
+  if(name==='uriage'&&shiireData===null) loadShiire();
   if(name==='shiire'&&shiireData===null) loadShiire();
 }
 
@@ -1731,6 +1876,7 @@ async function loadShiire(){
   try{
     await ensureStaffLoaded();
     shiireData=await spGetItems(SHIIRE_LIST);
+    if(typeof renderTsuusan==='function'&&denpyoData)renderTsuusan();
     renderShiire();
     document.getElementById('shiire-updated').textContent='最終更新 '+new Date().toLocaleString('ja-JP');
   }catch(e){
