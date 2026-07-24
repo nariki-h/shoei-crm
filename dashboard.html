@@ -1409,7 +1409,7 @@ const TARGETS_FALLBACK={
   '馬場 宏一':{full:48000000,h1:24000000,h2:24000000},
   '村上 光南':{full:12000000,h1: 6000000,h2: 6000000},
 };
-const Q_MAP={'上期':'h1','下期':'h2','通期':'full','Q1':'q1','Q2':'q2','Q3':'q3','Q4':'q4'};
+const Q_MAP={'月次':'m','上期':'h1','下期':'h2','通期':'full','Q1':'q1','Q2':'q2','Q3':'q3','Q4':'q4'};
 async function loadTargets(){
   if(targetData) return targetData;
   try{
@@ -1566,6 +1566,13 @@ function achievementDashboard(fy){
     if(rowKey==='Aチーム') return targetData['Aチーム']?.[key]||0;
     return targetData[rowKey]?.[key]||0;
   };
+  // 月次目標（当月セクション用）。1ヶ月分の目標額。
+  const monthTargetOf=(rowKey)=>{
+    if(!targetData)return 0;
+    if(rowKey==='部署') return targetData['部署']?.m||0;
+    if(rowKey==='Aチーム') return targetData['Aチーム']?.m||0;
+    return targetData[rowKey]?.m||0;
+  };
   const actualOf=(rowKey,stats)=>{
     if(rowKey==='部署') return totalOfStats(stats);
     if(rowKey==='Aチーム') return teamTotalOfStats(stats,teamName);
@@ -1605,24 +1612,34 @@ function achievementDashboard(fy){
     </div>`;
   };
 
-  // ---------- セクション②：当月実績（左＝契約ベース、右＝入金ベース）----------
-  const curMaxK=Math.max(1,...rowKeys.map(k=>actualOf(k,curK)));
-  const curMaxN=Math.max(1,...rowKeys.map(k=>actualOf(k,curN)));
-  const curBar=(actual,maxV,color)=>{
-    const w=maxV?Math.min(100,actual/maxV*100):0;
-    return `<div style="display:grid;grid-template-columns:1fr 100px;gap:10px;align-items:center;">
-      <div style="height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;">
-        <div style="height:100%;width:${w.toFixed(1)}%;background:${color};"></div>
+  // ---------- セクション②：当月実績（月次目標との対比）----------
+  const curMaxK=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curK))));
+  const curMaxN=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curN))));
+  const curBar=(actual,target,maxV,color)=>{
+    const w=Math.min(100,actual/maxV*100);
+    const tLine=target>0?`<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;"></div>`:'';
+    const pct=target?(actual/target*100):null;
+    const pctColor=pct==null?'':(pct>=100?'#16a34a':(pct>=70?'#d97706':'#dc2626'));
+    return `<div style="display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;">
+      <div style="position:relative;height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;">
+        <div style="height:100%;width:${w.toFixed(1)}%;background:${color};"></div>${tLine}
       </div>
-      <b style="font-size:14px;text-align:right;">${yen(actual)}</b>
+      <div style="text-align:right;">
+        <b style="font-size:15px;">${yen(actual)}</b>
+        ${pct!=null?`<div style="font-size:12px;color:${pctColor};font-weight:700;">${pct.toFixed(1)}%</div>`:'<div style="font-size:10px;color:var(--text3);">目標未設定</div>'}
+      </div>
     </div>`;
   };
   const curRow=(rowKey)=>{
+    const tgt=monthTargetOf(rowKey);
     const aK=actualOf(rowKey,curK), aN=actualOf(rowKey,curN);
     return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
-      <b>${rowKey}</b>
-      ${curBar(aK,curMaxK,'#2563eb')}
-      ${curBar(aN,curMaxN,'#16a34a')}
+      <div>
+        <b>${rowKey}</b>
+        <div style="font-size:10px;color:var(--text3);">${tgt?`月目標 ${yen(tgt)}`:'目標未設定'}</div>
+      </div>
+      ${curBar(aK,tgt,curMaxK,'#2563eb')}
+      ${curBar(aN,tgt,curMaxN,'#16a34a')}
     </div>`;
   };
 
@@ -1638,8 +1655,8 @@ function achievementDashboard(fy){
     ${legendHalf}
     ${rowKeys.map(halfRow).join('')}
 
-    <div class="section-title" style="margin-top:20px;">${curLabel} 実績</div>
-    <div style="font-size:11px;color:var(--text3);margin:-4px 0 8px;">当月の売上（目標なし・部署内の相対比較）</div>
+    <div class="section-title" style="margin-top:20px;">${curLabel} 達成状況</div>
+    <div style="font-size:11px;color:var(--text3);margin:-4px 0 8px;">当月実績 vs 月次目標（黒縦線＝目標位置）</div>
     ${legendHalf}
     ${rowKeys.map(curRow).join('')}
   `;
