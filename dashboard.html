@@ -1522,76 +1522,29 @@ function renderTsuusan(){
   const el=document.getElementById('uri-tsuusan'); if(!el)return;
   if(!denpyoData){el.innerHTML='';return;}
   if(!targetData){loadTargets().then(()=>renderTsuusan());return;}
-  const basis=document.getElementById('uri-basis').value;
   const m0=getMonthRange()[0];
   const fy=fyYear(m0.year,m0.month);
-  const {per,stockTotal,stockBucho}=computeTsuusan(basis,fy);
-  // 年度経過率（過去年度=100%、未来=0%、当年度=経過月/12）
-  const now=new Date(); const nowFy=fyYear(now.getFullYear(),now.getMonth()+1);
-  const elapse=fy<nowFy?1:(fy>nowFy?0:(fyIndex(now.getMonth()+1)+1)/12);
-  // 表示順：目標保有者（目標額降順）→その他（実績降順）
-  const withT=Object.keys(targetData).sort((a,b)=>targetData[b]-targetData[a]);
-  const others=[...per.keys()].filter(n=>!targetData[n]&&n&&n!=='—'&&!EXCLUDED_STAFF.has(n))
-    .sort((a,b)=>{const A=per.get(a),B=per.get(b);return (B.chukai+B.shiire)-(A.chukai+A.shiire);});
-  const rowsHtml=[...withT,...others].map(name=>{
-    const o=per.get(name)||{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,monthly:new Array(12).fill(0)};
-    const total=o.chukai+o.shiire;
-    const tgt=targetData[name]||0;
-    const pct=tgt?total/tgt:null;
-    const dealCnt=o.cnt+o.shiireCnt;
-    const avgT=dealCnt?Math.round(total/dealCnt):0;
-    const bar=tgt?`
-      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-        <div style="flex:1;height:8px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;position:relative;">
-          <div style="height:100%;width:${Math.min(100,pct*100).toFixed(1)}%;background:${pct>=elapse?'#16a34a':(pct>=elapse*0.7?'#d97706':'#dc2626')};"></div>
-          <div style="position:absolute;top:0;bottom:0;left:${Math.min(99.5,elapse*100).toFixed(1)}%;width:2px;background:var(--text3,#9ca3af);"></div>
-        </div>
-        <div style="font-weight:700;min-width:58px;text-align:right;font-size:15px;">${(pct*100).toFixed(1)}%</div>
-      </div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px;">目標 ${yen(tgt)}（縦線＝年度経過 ${(elapse*100).toFixed(0)}%）</div>`
-      :`<div style="font-size:10px;color:var(--text3);margin-top:4px;">目標未設定</div>`;
-    return `<div style="padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px;">
-        <b>${name}</b>
-        <span><b style="font-size:17px;">${o.cnt}件</b>${o.shiireCnt?`<span style="font-size:11px;color:var(--text3);">＋仕入${o.shiireCnt}件</span>`:''}　<b style="font-size:17px;color:var(--green,#16a34a);">${yen(total)}</b></span>
-      </div>
-      ${o.shiire?`<div style="font-size:10px;color:var(--text3);">内訳：仲介 ${yen(o.chukai)} ／ 仕入確定粗利 ${yen(o.shiire)}</div>`:''}
-      ${bar}
-      <div style="font-size:10px;color:var(--text3);margin-top:2px;">取扱高 ${yen(o.sou)} ・ 平均単価 ${yen(avgT)}</div>
-    </div>`;
-  }).join('');
-  el.innerHTML=`
-    <div class="section-title" style="margin-top:16px;">個人別 通算成績（${fy}年度累計・${basis==='kessai'?'決済日':'契約日'}基準）</div>
-    <div style="font-size:10px;color:var(--text3);margin:-4px 0 8px;">仲介は部署ストックを除いた個人分、仕入は確定粗利のみ合算</div>
-    <div style="display:grid;gap:8px;">${rowsHtml||'<div class="uri-empty">データなし</div>'}</div>
-    ${stockTotal?`<div style="font-size:11px;color:var(--text3);margin-top:6px;">部署ストック（年度計）：${yen(stockTotal)}${stockBucho?`（うち部長案件 ${yen(stockBucho)}）`:''}</div>`:''}
-    ${achievementDashboard(fy)}
-  `;
+  el.innerHTML=achievementDashboard(fy);
 }
-// 半期目標に対する達成状況：左＝半期累計vs目標、右＝当月実績
-// 各行：部署／Aチーム／個人3人、それぞれ契約ベース・入金ベースの2本
+
 function achievementDashboard(fy){
   const now=new Date();
   const nowFy=fyYear(now.getFullYear(),now.getMonth()+1);
   const nowH=halfOfMonth(now.getMonth()+1);
-  // 表示中の年度に対応する半期。過年度なら下期（＝年度全体を含む）、当年度なら今日の半期、来年度なら上期
   const h=(fy<nowFy)?2:(fy>nowFy?1:nowH);
   const hMonths=halfMonthsOf(fy,h);
   const curMonths=(fy===nowFy)?[{year:now.getFullYear(),month:now.getMonth()+1}]:[hMonths[hMonths.length-1]];
   const halfLabel=h===1?`${fy}年度 上期（4〜9月）`:`${fy}年度 下期（10〜3月）`;
   const curLabel=curMonths[0]?`${curMonths[0].year}年${curMonths[0].month}月`:'';
 
-  // 契約/入金それぞれで2種類の統計
   const halfK=computeStats('keiyaku',hMonths), halfN=computeStats('kessai',hMonths);
   const curK =computeStats('keiyaku',curMonths), curN=computeStats('kessai',curMonths);
 
-  // 行定義：部署／Aチーム／個人3名（TARGET_EXCLUDED_STAFFは除外＝成木は個人行なし）
   const teamName='A';
-  const individuals=[...targetData?Object.keys(targetData):[]]
+  const individuals=(targetData?Object.keys(targetData):[])
     .filter(n=>!TARGET_EXCLUDED_STAFF.has(n)&&n!=='部署'&&n!==`${teamName}チーム`&&n!=='Aチーム')
-    .sort((a,b)=>(targetData[b]?.h1||0)+(targetData[b]?.h2||0)-(targetData[a]?.h1||0)-(targetData[a]?.h2||0));
+    .sort((a,b)=>((targetData[b]?.h1||0)+(targetData[b]?.h2||0))-((targetData[a]?.h1||0)+(targetData[a]?.h2||0)));
 
-  // 目標取得：部署・チームは目標値リストに'部署'/'Aチーム'として入っていれば使う、なければ「未設定」
   const targetOf=(rowKey,h)=>{
     if(!targetData)return 0;
     const key=h===1?'h1':'h2';
@@ -1599,71 +1552,82 @@ function achievementDashboard(fy){
     if(rowKey==='Aチーム') return targetData['Aチーム']?.[key]||0;
     return targetData[rowKey]?.[key]||0;
   };
-  const halfActualOf=(rowKey,stats)=>{
+  const actualOf=(rowKey,stats)=>{
     if(rowKey==='部署') return totalOfStats(stats);
     if(rowKey==='Aチーム') return teamTotalOfStats(stats,teamName);
     const o=stats.per.get(rowKey);
     return o?(o.chukai+o.shiire):0;
   };
-
   const rowKeys=['部署','Aチーム',...individuals];
-  // 左右の最大値（バー長の基準）：目標と実績の大きい方
-  const leftMax=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),halfActualOf(k,halfK),halfActualOf(k,halfN))));
-  const rightMax=Math.max(1,...rowKeys.map(k=>Math.max(halfActualOf(k,curK),halfActualOf(k,curN))));
 
-  const barCell=(actualK,actualN,target,maxV,showTarget)=>{
-    const wK=Math.min(100,actualK/maxV*100);
-    const wN=Math.min(100,actualN/maxV*100);
-    const tgtLine=(showTarget&&target>0)?`<div style="position:absolute;top:0;bottom:0;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;opacity:0.65;"></div>`:'';
-    const pctK=target?(actualK/target*100).toFixed(1)+'%':'';
-    const pctN=target?(actualN/target*100).toFixed(1)+'%':'';
-    return `
-    <div style="display:grid;grid-template-columns:34px 1fr 76px;gap:6px;align-items:center;margin:2px 0;">
-      <span style="font-size:10px;color:var(--text3);">契約</span>
-      <div style="position:relative;height:14px;background:var(--border,#e5e7eb);border-radius:3px;overflow:hidden;">
-        <div style="height:100%;width:${wK.toFixed(1)}%;background:#2563eb;"></div>${tgtLine}
+  // ---------- セクション①：半期達成率（左＝契約ベース、右＝入金ベース）----------
+  const halfMaxK=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfK))));
+  const halfMaxN=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfN))));
+  const halfBar=(actual,target,maxV,color)=>{
+    const w=Math.min(100,actual/maxV*100);
+    const tLine=target>0?`<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;"></div>`:'';
+    const pct=target?(actual/target*100):null;
+    const pctColor=pct==null?'':(pct>=100?'#16a34a':(pct>=70?'#d97706':'#dc2626'));
+    return `<div style="display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;">
+      <div style="position:relative;height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;">
+        <div style="height:100%;width:${w.toFixed(1)}%;background:${color};"></div>${tLine}
       </div>
-      <span style="font-size:11px;text-align:right;">${yen(actualK)}${pctK?`<span style="color:var(--text3);font-size:10px;"> ${pctK}</span>`:''}</span>
-    </div>
-    <div style="display:grid;grid-template-columns:34px 1fr 76px;gap:6px;align-items:center;margin:2px 0;">
-      <span style="font-size:10px;color:var(--text3);">入金</span>
-      <div style="position:relative;height:14px;background:var(--border,#e5e7eb);border-radius:3px;overflow:hidden;">
-        <div style="height:100%;width:${wN.toFixed(1)}%;background:#16a34a;"></div>${tgtLine}
+      <div style="text-align:right;">
+        <b style="font-size:15px;">${yen(actual)}</b>
+        ${pct!=null?`<div style="font-size:12px;color:${pctColor};font-weight:700;">${pct.toFixed(1)}%</div>`:'<div style="font-size:10px;color:var(--text3);">目標未設定</div>'}
       </div>
-      <span style="font-size:11px;text-align:right;">${yen(actualN)}${pctN?`<span style="color:var(--text3);font-size:10px;"> ${pctN}</span>`:''}</span>
     </div>`;
   };
-
-  const rowHtml=(rowKey)=>{
+  const halfRow=(rowKey)=>{
     const tgt=targetOf(rowKey,h);
-    const aK=halfActualOf(rowKey,halfK), aN=halfActualOf(rowKey,halfN);
-    const cK=halfActualOf(rowKey,curK), cN=halfActualOf(rowKey,curN);
-    const tgtStr=tgt?`目標 ${yen(tgt)}`:'目標未設定';
-    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:8px;">
+    const aK=actualOf(rowKey,halfK), aN=actualOf(rowKey,halfN);
+    return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
       <div>
-        <div style="display:flex;justify-content:space-between;align-items:baseline;">
-          <b>${rowKey}</b><span style="font-size:10px;color:var(--text3);">${tgtStr}</span>
-        </div>
-        ${barCell(aK,aN,tgt,leftMax,true)}
+        <b>${rowKey}</b>
+        <div style="font-size:10px;color:var(--text3);">${tgt?`目標 ${yen(tgt)}`:'目標未設定'}</div>
       </div>
-      <div>
-        <div style="font-size:10px;color:var(--text3);text-align:right;">当月実績</div>
-        ${barCell(cK,cN,0,rightMax,false)}
-      </div>
+      ${halfBar(aK,tgt,halfMaxK,'#2563eb')}
+      ${halfBar(aN,tgt,halfMaxN,'#16a34a')}
     </div>`;
   };
+
+  // ---------- セクション②：当月実績（左＝契約ベース、右＝入金ベース）----------
+  const curMaxK=Math.max(1,...rowKeys.map(k=>actualOf(k,curK)));
+  const curMaxN=Math.max(1,...rowKeys.map(k=>actualOf(k,curN)));
+  const curBar=(actual,maxV,color)=>{
+    const w=maxV?Math.min(100,actual/maxV*100):0;
+    return `<div style="display:grid;grid-template-columns:1fr 100px;gap:10px;align-items:center;">
+      <div style="height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;">
+        <div style="height:100%;width:${w.toFixed(1)}%;background:${color};"></div>
+      </div>
+      <b style="font-size:14px;text-align:right;">${yen(actual)}</b>
+    </div>`;
+  };
+  const curRow=(rowKey)=>{
+    const aK=actualOf(rowKey,curK), aN=actualOf(rowKey,curN);
+    return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
+      <b>${rowKey}</b>
+      ${curBar(aK,curMaxK,'#2563eb')}
+      ${curBar(aN,curMaxN,'#16a34a')}
+    </div>`;
+  };
+
+  const legendHalf=`<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:0 12px;font-size:11px;color:var(--text3);margin-bottom:4px;">
+    <div></div>
+    <div style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:#2563eb;display:inline-block;border-radius:2px;"></span>契約ベース</div>
+    <div style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:#16a34a;display:inline-block;border-radius:2px;"></span>入金ベース</div>
+  </div>`;
 
   return `
-    <div class="section-title" style="margin-top:20px;">達成状況ダッシュボード</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:6px;font-size:11px;color:var(--text3);">
-      <div>左：${halfLabel}累計 vs 半期目標（黒線＝目標）</div>
-      <div style="text-align:right;">右：${curLabel}実績</div>
-    </div>
-    <div style="font-size:10px;color:var(--text3);margin-bottom:8px;">
-      <span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;"><span style="width:10px;height:8px;background:#2563eb;display:inline-block;border-radius:2px;"></span>契約ベース（契約日で計上）</span>
-      <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:10px;height:8px;background:#16a34a;display:inline-block;border-radius:2px;"></span>入金ベース（決済日で計上）</span>
-    </div>
-    ${rowKeys.map(rowHtml).join('')}
+    <div class="section-title" style="margin-top:20px;">${halfLabel} 達成状況</div>
+    <div style="font-size:11px;color:var(--text3);margin:-4px 0 8px;">半期累計 vs 半期目標（黒縦線＝目標位置）</div>
+    ${legendHalf}
+    ${rowKeys.map(halfRow).join('')}
+
+    <div class="section-title" style="margin-top:20px;">${curLabel} 実績</div>
+    <div style="font-size:11px;color:var(--text3);margin:-4px 0 8px;">当月の売上（目標なし・部署内の相対比較）</div>
+    ${legendHalf}
+    ${rowKeys.map(curRow).join('')}
   `;
 }
 
