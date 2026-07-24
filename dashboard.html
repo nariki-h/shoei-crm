@@ -1398,6 +1398,9 @@ function renderUriage(){
 }
 
 // ===== 個人別 通算成績（年度累計 vs 通期目標）＋部署ストック＋仕入確定粗利合算 =====
+// 名前正規化：スペース（全角・半角）を除去して比較する。担当者マスターの表記ゆれを吸収。
+function normName(s){return String(s||'').replace(/[\s\u3000]/g,'');}
+
 // 目標データ：{name: {full: 通期額, h1: 上期額, h2: 下期額}}
 // 半期表示時は h1/h2 を使い、なければ通期÷2にフォールバック。
 let targetData=null;
@@ -1446,25 +1449,33 @@ function computeStats(basis,months){
   const dateOfChukai=r=>basis==='kessai'?r.kessaiDate:r.keiyakuDate;
   const stockOf=r=>Math.max(0,Math.min(r.stock||0,r.uriage||0));
   const rows=(denpyoData||[]).filter(r=>inPeriod(dateOfChukai(r),months));
+  // 名前正規化のマップ：normName→表示名（目標値リストの表記を優先）
+  const dispMap=new Map();
+  if(targetData)Object.keys(targetData).forEach(n=>dispMap.set(normName(n),n));
+  const disp=n=>dispMap.get(normName(n))||n;
   const per=new Map(); let stockTotal=0,stockBucho=0;
   const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0});return per.get(k);};
+  const isExcludedStock=name=>{
+    // TARGET_EXCLUDED_STAFF もスペース差を吸収して判定
+    for(const ex of TARGET_EXCLUDED_STAFF){if(normName(ex)===normName(name))return true;}
+    return false;
+  };
   rows.forEach(r=>{
     const st=stockOf(r); stockTotal+=st;
-    if(TARGET_EXCLUDED_STAFF.has(r.staff))stockBucho+=st;
-    const o=ensure(r.staff); const own=r.uriage-st;
+    if(isExcludedStock(r.staff))stockBucho+=st;
+    const o=ensure(disp(r.staff)); const own=r.uriage-st;
     o.cnt++; o.chukai+=own; o.sou+=(r.honntai||r.sougaku||0);
   });
   (shiireData||[]).forEach(it=>{
     const p=shiireProfit(it);
+    const name=disp(it.Tantosha||'—');
     if(basis==='kessai'){
-      // 入金基準：確定粗利のみ
       if(p.settled&&p.kakutei!=null&&inPeriod(it.SellKessaiDate,months)){
-        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.kakutei;
+        const o=ensure(name); o.shiireCnt++; o.shiire+=p.kakutei;
       }
     } else {
-      // 契約基準：仕入契約日で見込み粗利を計上
       if(it.BuyKeiyakuDate&&inPeriod(it.BuyKeiyakuDate,months)){
-        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.mikomi;
+        const o=ensure(name); o.shiireCnt++; o.shiire+=p.mikomi;
       }
     }
   });
@@ -1479,9 +1490,12 @@ function totalOfStats(stats){
 }
 // チーム合計（Aチーム）＝チームメンバーの合計。ストックは含めない（部長ストックはチーム外）
 function teamTotalOfStats(stats,teamName){
+  // staffTeamMap自体が表記ゆれを持つため、正規化キーで再構築してから照合
+  const normMap={};
+  Object.keys(staffTeamMap||{}).forEach(k=>{normMap[normName(k)]=staffTeamMap[k];});
   let total=0;
   stats.per.forEach((o,name)=>{
-    if(staffTeamMap[name]===teamName)total+=o.chukai+o.shiire;
+    if(normMap[normName(name)]===teamName)total+=o.chukai+o.shiire;
   });
   return total;
 }
