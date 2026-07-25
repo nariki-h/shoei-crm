@@ -1539,18 +1539,19 @@ function renderTsuusan(){
   if(!targetData){loadTargets().then(()=>renderTsuusan());return;}
   const m0=getMonthRange()[0];
   const fy=fyYear(m0.year,m0.month);
-  el.innerHTML=achievementDashboard(fy);
+  el.innerHTML=achievementDashboard(fy,m0);
 }
 
-function achievementDashboard(fy){
+function achievementDashboard(fy,selMonth){
+  // 半期・当月は「今日」ではなく画面で表示中の月に追従させる。
+  // 選択月が属する半期（上期/下期）をまるごと出し、当月セクションは選択月そのものを出す。
   const now=new Date();
-  const nowFy=fyYear(now.getFullYear(),now.getMonth()+1);
-  const nowH=halfOfMonth(now.getMonth()+1);
-  const h=(fy<nowFy)?2:(fy>nowFy?1:nowH);
+  const sel=selMonth||{year:now.getFullYear(),month:now.getMonth()+1};
+  const h=halfOfMonth(sel.month);
   const hMonths=halfMonthsOf(fy,h);
-  const curMonths=(fy===nowFy)?[{year:now.getFullYear(),month:now.getMonth()+1}]:[hMonths[hMonths.length-1]];
+  const curMonths=[{year:sel.year,month:sel.month}];
   const halfLabel=h===1?`${fy}年度 上期（4〜9月）`:`${fy}年度 下期（10〜3月）`;
-  const curLabel=curMonths[0]?`${curMonths[0].year}年${curMonths[0].month}月`:'';
+  const curLabel=`${sel.year}年${sel.month}月`;
 
   const halfK=computeStats('keiyaku',hMonths), halfN=computeStats('kessai',hMonths);
   const curK =computeStats('keiyaku',curMonths), curN=computeStats('kessai',curMonths);
