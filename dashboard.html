@@ -399,6 +399,17 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
      <div id="uri-tsuusan"></div>
 
      <div>
+       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+         <div class="section-title" style="margin:0;">入金明細（物件別）</div>
+         <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer;">
+           <input type="checkbox" id="uri-nyukin-all" onchange="nyukinShowAll=this.checked;renderNyukinList();"> 未入金は期間外も表示
+         </label>
+         <button class="refresh-btn" onclick="exportNyukinCsv()">⬇ CSV出力</button>
+       </div>
+       <div id="uri-nyukin-box"></div>
+     </div>
+
+     <div>
        <div class="section-title">契約明細</div>
        <div id="uri-detail"></div>
      </div>
@@ -1365,6 +1376,113 @@ function nyukinPending(r){
 }
 const NYUKIN_LABEL={keiyaku:'契約日',kessai:'決済日',nyukin:'入金日'};
 
+/* ============================================================
+   入金明細（物件別）：経理が「どの物件の入金か」を追えるようにする一覧。
+   1行＝1入金レグ（売主/買主 × 1回目/2回目）。入金済も未入金も同じ表に出す。
+   ・期間判定は 入金済＝完了日(L/Z)、未入金＝予定日(I/W)
+   ・「未入金は期間外も表示」ONで、期間外の未回収と予定日未入力も全部出す
+   ============================================================ */
+let nyukinShowAll=false;
+let nyukinListCache=[];
+const escH=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const escAttr=v=>escH(v).replace(/\n/g,'&#10;');
+// 物件の呼び名：住居表示 → 所在地 → №
+const bukkenName=r=>r.jukyo||r.shozai||('№'+(r.no||'—'));
+
+function nyukinRows(list,months,showAll){
+  const today=new Date().toISOString().slice(0,10);
+  const out=[];
+  (list||[]).forEach(r=>{
+    (r.nyukin||[]).forEach(x=>{
+      if(!(x.amount>0))return;
+      const done=!!x.done;
+      const date=done?x.done:(x.plan||'');
+      const inP=date?inPeriod(date,months):false;
+      if(done){ if(!inP)return; }               // 実績はいつも選択期間のみ
+      else { if(!showAll&&!inP)return; }        // 未入金は全表示ONなら期間外も出す
+      out.push({r,side:x.side,seq:x.seq,amount:x.amount,done,date,plan:x.plan,
+        status:done?'入金済':(!x.plan?'予定日未入力':(x.plan<today?'超過':'予定')),
+        from:(x.side==='売主'?r.urinushi:r.kainushi)||''});
+    });
+  });
+  return out.sort((a,b)=>(a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
+}
+
+function renderNyukinList(){
+  const box=document.getElementById('uri-nyukin-box'); if(!box)return;
+  if(!denpyoData){box.innerHTML='';nyukinListCache=[];return;}
+  const months=getMonthRange();
+  const rows=nyukinRows(denpyoData,months,nyukinShowAll);
+  nyukinListCache=rows;
+  if(!rows.length){box.innerHTML='<div class="uri-empty">該当する入金がありません</div>';return;}
+
+  const badge=st=>{
+    const c={'入金済':['#16a34a','#dcfce7'],'予定':['#64748b','#f1f5f9'],'超過':['#b45309','#fef3c7'],'予定日未入力':['#dc2626','#fee2e2']}[st]||['#64748b','#f1f5f9'];
+    return `<span style="font-size:10px;font-weight:700;color:${c[0]};background:${c[1]};padding:2px 6px;border-radius:99px;white-space:nowrap;">${st}</span>`;
+  };
+  const monthOf=d=>d?`${d.slice(0,4)}年${Number(d.slice(5,7))}月`:'予定日未入力';
+
+  let html='',cur=null,gDone=0,gPlan=0,tDone=0,tPlan=0;
+  const flush=()=>{ if(cur===null)return;
+    html+=`<tr style="background:var(--bg2,#f8fafc);font-size:11px;">
+      <td class="left" colspan="6" style="text-align:right;color:var(--text3);">${cur} 小計</td>
+      <td style="font-weight:700;color:var(--green);">${gDone?yen(gDone):'—'}</td>
+      <td style="font-weight:700;color:var(--text3);">${gPlan?'予定 '+yen(gPlan):'—'}</td>
+      <td></td></tr>`;
+    gDone=0;gPlan=0; };
+  rows.forEach(x=>{
+    const m=monthOf(x.date);
+    if(m!==cur){ flush(); cur=m;
+      html+=`<tr style="background:var(--bg2,#f1f5f9);"><td class="left" colspan="9" style="font-weight:700;font-size:12px;">${m}</td></tr>`; }
+    if(x.done){gDone+=x.amount;tDone+=x.amount;}else{gPlan+=x.amount;tPlan+=x.amount;}
+    html+=`<tr style="${x.done?'':'opacity:.85;'}">
+      <td class="left">${x.date||'—'}</td>
+      <td class="left">${badge(x.status)}</td>
+      <td class="left"><span class="pill">${escH(x.r.no||'未記入')}</span></td>
+      <td class="left" title="${escAttr(x.r.shozai||'')}"><b>${escH(bukkenName(x.r))}</b>
+        <div style="font-size:10px;color:var(--text3);">${escH(x.r.bukkenType||'')}</div></td>
+      <td class="left">${escH(x.from||'—')}</td>
+      <td class="left" style="font-size:11px;white-space:nowrap;">${x.side}${x.seq}回目</td>
+      <td style="font-weight:700;color:${x.done?'var(--green)':'var(--text3)'};">${x.done?yen(x.amount):'—'}</td>
+      <td style="color:var(--text3);">${x.done?'—':yen(x.amount)}</td>
+      <td class="left">${escH(x.r.staff||'')}</td>
+    </tr>`;
+  });
+  flush();
+
+  box.innerHTML=`<div class="uri-table-wrap"><table class="uri">
+    <thead><tr>
+      <th class="left">入金日／予定日</th><th class="left">状態</th><th class="left">№</th>
+      <th class="left">物件</th><th class="left">入金元</th><th class="left">区分</th>
+      <th>入金済（税前）</th><th>入金予定（税前）</th><th class="left">担当</th>
+    </tr></thead>
+    <tbody>${html}</tbody>
+    <tfoot><tr><td class="left" colspan="6">合計 ${rows.length}件</td>
+      <td>${yen(tDone)}</td><td>${yen(tPlan)}</td><td></td></tr></tfoot>
+  </table></div>
+  <div style="font-size:11px;color:var(--text3);margin-top:4px;">
+    金額は税前（O27／AC27／O30／AC30）。入金済＝完了日(L/Z)あり、予定＝予定日(I/W)のみ。${nyukinShowAll?'未入金は期間外も含めて表示中。':''}
+  </div>`;
+}
+
+function exportNyukinCsv(){
+  if(!nyukinListCache.length){showToast('出力する入金がありません',true);return;}
+  const head=['入金日／予定日','状態','№','物件','所在地','入金元','区分','入金済(税前)','入金予定(税前)','担当','契約日','決済日'];
+  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const lines=[head.map(q).join(',')];
+  nyukinListCache.forEach(x=>lines.push([
+    x.date||'',x.status,x.r.no||'',bukkenName(x.r),x.r.shozai||'',x.from||'',
+    `${x.side}${x.seq}回目`,x.done?x.amount:'',x.done?'':x.amount,x.r.staff||'',
+    x.r.keiyakuDate||'',x.r.kessaiDate||''].map(q).join(',')));
+  const blob=new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`入金明細_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+  showToast(`${nyukinListCache.length}件をCSV出力しました`);
+}
+
 const yen=v=>'¥'+Number(v||0).toLocaleString('ja-JP');
 const man=v=>Math.round(Number(v||0)/10000).toLocaleString('ja-JP')+'万';
 
@@ -1382,6 +1500,7 @@ function renderUriage(){
     const _tb=document.getElementById('uri-team-tbody'); if(_tb) _tb.innerHTML='';
     const _tf=document.getElementById('uri-team-tfoot'); if(_tf) _tf.innerHTML='';
     const _ts=document.getElementById('uri-tsuusan'); if(_ts) _ts.innerHTML='';
+    const _nb=document.getElementById('uri-nyukin-box'); if(_nb) _nb.innerHTML='';
     return;
   }
 
@@ -1511,6 +1630,7 @@ function renderUriage(){
     </table></div>`
     : `<div class="uri-empty">この期間に該当する${isNyukin?'入金':'契約'}はありません</div>`;
 
+  renderNyukinList();
   renderTsuusan();
 }
 
@@ -1571,7 +1691,7 @@ function computeStats(basis,months){
   if(targetData)Object.keys(targetData).forEach(n=>dispMap.set(normName(n),n));
   const disp=n=>dispMap.get(normName(n))||n;
   const per=new Map(); let stockTotal=0,stockBucho=0;
-  const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,yotei:0,yoteiCnt:0});return per.get(k);};
+  const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,yotei:0,yoteiCnt:0,doneList:[],yoteiList:[]});return per.get(k);};
   const isExcludedStock=name=>{
     // TARGET_EXCLUDED_STAFF もスペース差を吸収して判定
     for(const ex of TARGET_EXCLUDED_STAFF){if(normName(ex)===normName(name))return true;}
@@ -1585,12 +1705,14 @@ function computeStats(basis,months){
       if(isExcludedStock(l.row.staff))stockBucho+=l.stock;
       const o=ensure(disp(l.row.staff));
       o.chukai+=l.own;
+      o.doneList.push({p:bukkenName(l.row),d:l.date,a:l.own,t:`${l.side}${l.seq}`});
       const key=l.row.no||l.row.fileName;
       if(!seen.has(key)){seen.add(key);o.cnt++;o.sou+=(l.row.honntai||l.row.sougaku||0);}
     });
     // 未入金だが予定日が期間内にあるレグ＝入金予定（実績には足さず別枠で保持）
     allNyukinPlanLegs(denpyoData).filter(l=>inPeriod(l.date,months)).forEach(l=>{
       const o=ensure(disp(l.row.staff)); o.yotei+=l.own; o.yoteiCnt++;
+      o.yoteiList.push({p:bukkenName(l.row),d:l.date,a:l.own,t:`${l.side}${l.seq}`});
     });
   } else {
   rows.forEach(r=>{
@@ -1620,20 +1742,22 @@ function computeStats(basis,months){
 // 部署合計 内訳付き：{chukai, shiire, total} を返す。
 // ストックは仲介側に足す（部の売上として計上した部分は仲介AP33の性質）
 function totalOfStats(stats){
-  let chukai=0,shiire=0,yotei=0;
-  stats.per.forEach(o=>{chukai+=o.chukai;shiire+=o.shiire;yotei+=(o.yotei||0);});
+  let chukai=0,shiire=0,yotei=0;const doneList=[],yoteiList=[];
+  stats.per.forEach(o=>{chukai+=o.chukai;shiire+=o.shiire;yotei+=(o.yotei||0);
+    doneList.push(...(o.doneList||[]));yoteiList.push(...(o.yoteiList||[]));});
   chukai+=stats.stockTotal;
-  return {chukai,shiire,yotei,total:chukai+shiire};
+  return {chukai,shiire,yotei,doneList,yoteiList,total:chukai+shiire};
 }
 // チーム合計 内訳付き：{chukai, shiire, total}。ストックは含めない（部長ストックはチーム外）
 function teamTotalOfStats(stats,teamName){
   const normMap={};
   Object.keys(staffTeamMap||{}).forEach(k=>{normMap[normName(k)]=staffTeamMap[k];});
-  let chukai=0,shiire=0,yotei=0;
+  let chukai=0,shiire=0,yotei=0;const doneList=[],yoteiList=[];
   stats.per.forEach((o,name)=>{
-    if(normMap[normName(name)]===teamName){chukai+=o.chukai;shiire+=o.shiire;yotei+=(o.yotei||0);}
+    if(normMap[normName(name)]===teamName){chukai+=o.chukai;shiire+=o.shiire;yotei+=(o.yotei||0);
+      doneList.push(...(o.doneList||[]));yoteiList.push(...(o.yoteiList||[]));}
   });
-  return {chukai,shiire,yotei,total:chukai+shiire};
+  return {chukai,shiire,yotei,doneList,yoteiList,total:chukai+shiire};
 }
 // 既存のcomputeTsuusan（12ヶ月分・月別累計）は年度カード用に残す
 function fyMonthsOf(fy){const a=[];for(let i=0;i<12;i++){const m=(3+i)%12+1;a.push({year:m>=4?fy:fy+1,month:m});}return a;}
@@ -1745,8 +1869,9 @@ function achievementDashboard(fy,months){
     if(rowKey==='部署') return totalOfStats(stats);
     if(rowKey==='Aチーム') return teamTotalOfStats(stats,teamName);
     const o=stats.per.get(rowKey);
-    return o?{chukai:o.chukai,shiire:o.shiire,yotei:o.yotei||0,total:o.chukai+o.shiire}
-            :{chukai:0,shiire:0,yotei:0,total:0};
+    return o?{chukai:o.chukai,shiire:o.shiire,yotei:o.yotei||0,
+              doneList:o.doneList||[],yoteiList:o.yoteiList||[],total:o.chukai+o.shiire}
+            :{chukai:0,shiire:0,yotei:0,doneList:[],yoteiList:[],total:0};
   };
 
   // 色定義：契約系＝青系（濃=仲介／淡=仕入）、入金系＝緑系（濃=仲介／淡=仕入）
@@ -1764,9 +1889,16 @@ function achievementDashboard(fy,months){
     const pct=target?(a.total/target*100):null;
     const pctY=(target&&yo)?((a.total+yo)/target*100):null;
     const pctColor=pct==null?'':(pct>=100?'#16a34a':(pct>=70?'#d97706':'#dc2626'));
-    const tipC=a.chukai?`title="仲介 ${yen(a.chukai)}"`:'';
+    // 入金バーは物件名まで出す（経理が「何の物件の入金か」を追えるように）
+    const listTxt=(arr,head)=>{
+      if(!arr||!arr.length)return head;
+      const sorted=arr.slice().sort((x,y)=>(x.d||'').localeCompare(y.d||''));
+      const top=sorted.slice(0,10).map(x=>`${x.d} ${x.p}（${x.t}） ${man(x.a)}`).join('\n');
+      return head+'\n'+top+(sorted.length>10?`\n…ほか${sorted.length-10}件`:'');
+    };
+    const tipC=a.chukai?`title="${escAttr(listTxt(withYotei?a.doneList:null,'仲介 '+yen(a.chukai)))}"`:'';
     const tipS=a.shiire?`title="仕入 ${yen(a.shiire)}"`:'';
-    const tipY=yo?`title="入金予定 ${yen(yo)}（未入金・予定日ベース）"`:'';
+    const tipY=yo?`title="${escAttr(listTxt(a.yoteiList,'入金予定 '+yen(yo)+'（未入金・予定日ベース）'))}"`:'';
     return `<div style="display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;">
       <div style="position:relative;height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;display:flex;">
         <div ${tipC} style="height:100%;width:${wC.toFixed(1)}%;background:${colorChukai};"></div>
