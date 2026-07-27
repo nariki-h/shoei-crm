@@ -1347,6 +1347,17 @@ function nyukinLegs(r){
   });
 }
 function allNyukinLegs(list){const out=[];(list||[]).forEach(r=>out.push(...nyukinLegs(r)));return out;}
+// 入金「予定」レグ：完了日(L27/Z27/L30/Z30)が空で、予定日(I27/W27/I30/W30)と金額(O27/AC27/O30/AC30)が
+// 入っているもの。実績と同じくストック(AZ39)を同率で按分控除し、期間判定は予定日で行う。
+// グラフでは実績の右側に半透明ストライプで積む（＝着地見込み）。
+function nyukinPlanLegs(r){
+  const rate=(r.uriage>0)?Math.min(1,Math.max(0,(r.stock||0)/r.uriage)):0;
+  return (r.nyukin||[]).filter(x=>!x.done&&x.plan&&x.amount>0).map(x=>{
+    const st=Math.round(x.amount*rate);
+    return {row:r,date:x.plan,side:x.side,seq:x.seq,amount:x.amount,stock:st,own:x.amount-st};
+  });
+}
+function allNyukinPlanLegs(list){const out=[];(list||[]).forEach(r=>out.push(...nyukinPlanLegs(r)));return out;}
 // 未入金（完了日が空で金額のある）レグ。予定日が過ぎていれば遅延。
 function nyukinPending(r){
   return (r.nyukin||[]).filter(x=>!x.done&&x.amount>0)
@@ -1407,6 +1418,9 @@ function renderUriage(){
     ? uniqRows.flatMap(r=>nyukinPending(r).map(x=>({row:r,...x})))
     : [];
   const totPending=pendingList.reduce((a,x)=>a+x.amount,0);
+  // 期間内に予定日がある未入金レグ（＝この期間の入金予定）
+  const planIn=isNyukin?allNyukinPlanLegs(denpyoData).filter(l=>inPeriod(l.date,months)):[];
+  const totPlanIn=planIn.reduce((a,l)=>a+l.amount,0);
   const today=new Date().toISOString().slice(0,10);
   const lateCnt=pendingList.filter(x=>x.plan&&x.plan<today).length;
 
@@ -1414,7 +1428,7 @@ function renderUriage(){
     <div class="uri-card"><div class="lb">${isNyukin?'入金件数':'契約件数'}</div><div class="vl">${isNyukin?units.length:units.length}<span style="font-size:13px;font-weight:400;color:var(--text3)"> ${isNyukin?'入金':'件'}</span></div><div class="sb">${NYUKIN_LABEL[basis]||'契約日'}基準${isNyukin?`（${uniqRows.length}契約）`:''}</div></div>
     <div class="uri-card"><div class="lb">${isNyukin?'入金額（税前）':'売上計上金額'}</div><div class="vl" style="color:var(--green)">${man(totUri)}</div><div class="sb">${yen(totUri)}</div></div>
     <div class="uri-card"><div class="lb">${isNyukin?'未入金残 / 遅延':'取引総額 / 平均単価'}</div>${isNyukin
-      ?`<div class="sb" style="margin-top:6px;font-size:14px;font-weight:600;">${totPending?yen(totPending):'—'}</div><div class="sb" style="color:${lateCnt?'var(--amber)':'var(--text3)'}">${lateCnt?`予定日超過 ${lateCnt}件`:'予定日超過なし'}</div>`
+      ?`<div class="sb" style="margin-top:6px;font-size:14px;font-weight:600;">${totPending?yen(totPending):'—'}</div><div class="sb" style="color:${lateCnt?'var(--amber)':'var(--text3)'}">${lateCnt?`予定日超過 ${lateCnt}件`:'予定日超過なし'}</div><div class="sb">この期間の入金予定 ${totPlanIn?`${yen(totPlanIn)}（${planIn.length}件）`:'—'}</div>`
       :`<div class="sb" style="margin-top:6px;">取引総額 ${man(totSou)}</div><div class="sb">平均単価 ${man(avg)}</div>`}</div>
     <div class="uri-card"><div class="lb">部署ストック（期間内）</div><div class="sb" style="margin-top:6px;font-size:14px;font-weight:600;">${totStock?yen(totStock):'—'}</div><div class="sb">個人成績には含まれません</div></div>`;
 
@@ -1557,7 +1571,7 @@ function computeStats(basis,months){
   if(targetData)Object.keys(targetData).forEach(n=>dispMap.set(normName(n),n));
   const disp=n=>dispMap.get(normName(n))||n;
   const per=new Map(); let stockTotal=0,stockBucho=0;
-  const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0});return per.get(k);};
+  const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,yotei:0,yoteiCnt:0});return per.get(k);};
   const isExcludedStock=name=>{
     // TARGET_EXCLUDED_STAFF もスペース差を吸収して判定
     for(const ex of TARGET_EXCLUDED_STAFF){if(normName(ex)===normName(name))return true;}
@@ -1573,6 +1587,10 @@ function computeStats(basis,months){
       o.chukai+=l.own;
       const key=l.row.no||l.row.fileName;
       if(!seen.has(key)){seen.add(key);o.cnt++;o.sou+=(l.row.honntai||l.row.sougaku||0);}
+    });
+    // 未入金だが予定日が期間内にあるレグ＝入金予定（実績には足さず別枠で保持）
+    allNyukinPlanLegs(denpyoData).filter(l=>inPeriod(l.date,months)).forEach(l=>{
+      const o=ensure(disp(l.row.staff)); o.yotei+=l.own; o.yoteiCnt++;
     });
   } else {
   rows.forEach(r=>{
@@ -1602,20 +1620,20 @@ function computeStats(basis,months){
 // 部署合計 内訳付き：{chukai, shiire, total} を返す。
 // ストックは仲介側に足す（部の売上として計上した部分は仲介AP33の性質）
 function totalOfStats(stats){
-  let chukai=0,shiire=0;
-  stats.per.forEach(o=>{chukai+=o.chukai;shiire+=o.shiire;});
+  let chukai=0,shiire=0,yotei=0;
+  stats.per.forEach(o=>{chukai+=o.chukai;shiire+=o.shiire;yotei+=(o.yotei||0);});
   chukai+=stats.stockTotal;
-  return {chukai,shiire,total:chukai+shiire};
+  return {chukai,shiire,yotei,total:chukai+shiire};
 }
 // チーム合計 内訳付き：{chukai, shiire, total}。ストックは含めない（部長ストックはチーム外）
 function teamTotalOfStats(stats,teamName){
   const normMap={};
   Object.keys(staffTeamMap||{}).forEach(k=>{normMap[normName(k)]=staffTeamMap[k];});
-  let chukai=0,shiire=0;
+  let chukai=0,shiire=0,yotei=0;
   stats.per.forEach((o,name)=>{
-    if(normMap[normName(name)]===teamName){chukai+=o.chukai;shiire+=o.shiire;}
+    if(normMap[normName(name)]===teamName){chukai+=o.chukai;shiire+=o.shiire;yotei+=(o.yotei||0);}
   });
-  return {chukai,shiire,total:chukai+shiire};
+  return {chukai,shiire,yotei,total:chukai+shiire};
 }
 // 既存のcomputeTsuusan（12ヶ月分・月別累計）は年度カード用に残す
 function fyMonthsOf(fy){const a=[];for(let i=0;i<12;i++){const m=(3+i)%12+1;a.push({year:m>=4?fy:fy+1,month:m});}return a;}
@@ -1727,39 +1745,49 @@ function achievementDashboard(fy,months){
     if(rowKey==='部署') return totalOfStats(stats);
     if(rowKey==='Aチーム') return teamTotalOfStats(stats,teamName);
     const o=stats.per.get(rowKey);
-    return o?{chukai:o.chukai,shiire:o.shiire,total:o.chukai+o.shiire}:{chukai:0,shiire:0,total:0};
+    return o?{chukai:o.chukai,shiire:o.shiire,yotei:o.yotei||0,total:o.chukai+o.shiire}
+            :{chukai:0,shiire:0,yotei:0,total:0};
   };
 
   // 色定義：契約系＝青系（濃=仲介／淡=仕入）、入金系＝緑系（濃=仲介／淡=仕入）
   const C={contractC:'#2563eb',contractS:'#60a5fa',cashC:'#16a34a',cashS:'#86efac'};
 
   // 積み上げバー描画：仲介→仕入の順で左から積む。目標線と達成率%付き。
-  const stackBar=(a,target,maxV,colorChukai,colorShiire)=>{
+  // 半透明ストライプ＝入金予定（未入金だが予定日が期間内）
+  const stripe=c=>`repeating-linear-gradient(45deg,${c}66,${c}66 5px,${c}1f 5px,${c}1f 10px)`;
+  const stackBar=(a,target,maxV,colorChukai,colorShiire,withYotei)=>{
+    const yo=withYotei?(a.yotei||0):0;
     const wC=Math.min(100,a.chukai/maxV*100);
-    const wS=Math.min(100-wC,a.shiire/maxV*100);
+    const wS=Math.min(Math.max(0,100-wC),a.shiire/maxV*100);
+    const wY=Math.min(Math.max(0,100-wC-wS),yo/maxV*100);
     const tLine=target>0?`<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(99.5,target/maxV*100).toFixed(1)}%;width:2px;background:#111;z-index:2;"></div>`:'';
     const pct=target?(a.total/target*100):null;
+    const pctY=(target&&yo)?((a.total+yo)/target*100):null;
     const pctColor=pct==null?'':(pct>=100?'#16a34a':(pct>=70?'#d97706':'#dc2626'));
     const tipC=a.chukai?`title="仲介 ${yen(a.chukai)}"`:'';
     const tipS=a.shiire?`title="仕入 ${yen(a.shiire)}"`:'';
+    const tipY=yo?`title="入金予定 ${yen(yo)}（未入金・予定日ベース）"`:'';
     return `<div style="display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;">
       <div style="position:relative;height:20px;background:var(--border,#e5e7eb);border-radius:4px;overflow:hidden;display:flex;">
         <div ${tipC} style="height:100%;width:${wC.toFixed(1)}%;background:${colorChukai};"></div>
         <div ${tipS} style="height:100%;width:${wS.toFixed(1)}%;background:${colorShiire};"></div>
+        <div ${tipY} style="height:100%;width:${wY.toFixed(1)}%;background:${stripe(colorChukai)};"></div>
         ${tLine}
       </div>
       <div style="text-align:right;">
         <b style="font-size:15px;">${yen(a.total)}</b>
         ${pct!=null?`<div style="font-size:12px;color:${pctColor};font-weight:700;">${pct.toFixed(1)}%</div>`:'<div style="font-size:10px;color:var(--text3);">目標未設定</div>'}
+        ${yo?`<div style="font-size:10px;color:var(--text3);">予定 +${man(yo)}${pctY!=null?` → ${pctY.toFixed(1)}%`:''}</div>`:''}
       </div>
     </div>`;
   };
 
   const swatch=(color,label)=>`<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:12px;height:8px;background:${color};display:inline-block;border-radius:2px;"></span>${label}</span>`;
+  const swatchY=(color,label)=>`<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:12px;height:8px;background:${stripe(color)};display:inline-block;border-radius:2px;border:1px solid ${color}55;"></span>${label}</span>`;
   const legend=`<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:0 12px;font-size:11px;color:var(--text3);margin-bottom:4px;">
     <div></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">契約：${swatch(C.contractC,'仲介')} ${swatch(C.contractS,'仕入')}</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">入金：${swatch(C.cashC,'仲介')} ${swatch(C.cashS,'仕入')}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">入金：${swatch(C.cashC,'仲介')} ${swatch(C.cashS,'仕入')} ${swatchY(C.cashC,'入金予定')}</div>
   </div>`;
 
   // ---------- 汎用セクション描画 ----------
@@ -1767,7 +1795,7 @@ function achievementDashboard(fy,months){
   const buildSection=(title,sub,secMonths,tgtFn,tgtLabel)=>{
     const sK=computeStats('keiyaku',secMonths), sN=computeStats('nyukin',secMonths);
     const maxK=Math.max(1,...rowKeys.map(k=>Math.max(tgtFn(k),actualOf(k,sK).total)));
-    const maxN=Math.max(1,...rowKeys.map(k=>Math.max(tgtFn(k),actualOf(k,sN).total)));
+    const maxN=Math.max(1,...rowKeys.map(k=>{const a=actualOf(k,sN);return Math.max(tgtFn(k),a.total+(a.yotei||0));}));
     const detail=a=>a.shiire?`<div style="font-size:9px;color:var(--text3);">仲 ${yen(a.chukai)} ／ 仕 ${yen(a.shiire)}</div>`:'';
     const row=rowKey=>{
       const tgt=tgtFn(rowKey);
@@ -1778,7 +1806,7 @@ function achievementDashboard(fy,months){
           <div style="font-size:10px;color:var(--text3);">${tgt?`${tgtLabel} ${yen(tgt)}`:'目標未設定'}</div>
         </div>
         <div>${stackBar(aK,tgt,maxK,C.contractC,C.contractS)}${detail(aK)}</div>
-        <div>${stackBar(aN,tgt,maxN,C.cashC,C.cashS)}${detail(aN)}</div>
+        <div>${stackBar(aN,tgt,maxN,C.cashC,C.cashS,true)}${detail(aN)}</div>
       </div>`;
     };
     return `
@@ -1791,7 +1819,7 @@ function achievementDashboard(fy,months){
   // ---------- ①半期（年度モードなら上期・下期を両方）----------
   const halfSec=(hh)=>buildSection(
     `${fy}年度 ${hh===1?'上期（4〜9月）':'下期（10〜3月）'} 達成状況`,
-    '半期累計 vs 半期目標（黒縦線＝目標位置）',
+    '半期累計 vs 半期目標（黒縦線＝目標位置／斜線＝入金予定）',
     halfMonthsOf(fy,hh),
     k=>tgtOf(k,hh===1?'h1':'h2',6),
     '半期目標');
@@ -1804,7 +1832,7 @@ function achievementDashboard(fy,months){
   const selLabel=(ms.length===1)?pk.name:(pk.name?`${pk.name}（${span}）`:span);
   const selPart=(pk.key==='h1'||pk.key==='h2')?'':buildSection(
     `${selLabel} 達成状況`,
-    `選択期間の実績 vs ${tgtNote(pk.key,pk.mult)}（黒縦線＝目標位置）`,
+    `選択期間の実績 vs ${tgtNote(pk.key,pk.mult)}（黒縦線＝目標位置／斜線＝入金予定）`,
     ms,
     k=>tgtOf(k,pk.key,pk.mult),
     pk.key==='m'?'月目標':'期間目標');
