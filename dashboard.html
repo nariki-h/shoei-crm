@@ -1667,45 +1667,61 @@ function renderTsuusan(){
   const el=document.getElementById('uri-tsuusan'); if(!el)return;
   if(!denpyoData){el.innerHTML='';return;}
   if(!targetData){loadTargets().then(()=>renderTsuusan());return;}
-  const m0=getMonthRange()[0];
-  const fy=fyYear(m0.year,m0.month);
-  el.innerHTML=achievementDashboard(fy,m0);
+  const months=getMonthRange();
+  const fy=fyYear(months[0].year,months[0].month);
+  el.innerHTML=achievementDashboard(fy,months);
 }
 
-function achievementDashboard(fy,selMonth){
-  // 半期・当月は「今日」ではなく画面で表示中の月に追従させる。
-  // 選択月が属する半期（上期/下期）をまるごと出し、当月セクションは選択月そのものを出す。
-  const now=new Date();
-  const sel=selMonth||{year:now.getFullYear(),month:now.getMonth()+1};
-  const h=halfOfMonth(sel.month);
-  const hMonths=halfMonthsOf(fy,h);
-  const curMonths=[{year:sel.year,month:sel.month}];
-  const halfLabel=h===1?`${fy}年度 上期（4〜9月）`:`${fy}年度 下期（10〜3月）`;
-  const curLabel=`${sel.year}年${sel.month}月`;
+// 選択期間が「年度／半期／四半期／単月」のどれかと完全一致するかを判定する。
+// 一致すれば目標値リストの該当キー(full/h1/h2/q1..q4/m)を、しなければ null を返す。
+// null のときは月次目標×月数で目標を算出する（期間指定モード用）。
+function periodTargetKey(fy,months){
+  const n=months.length;
+  const same=list=>list.length===n&&list.every((m,i)=>m.year===months[i].year&&m.month===months[i].month);
+  if(n===1) return {key:'m',mult:1,name:`${months[0].year}年${months[0].month}月`};
+  if(same(fyMonthsOf(fy)))    return {key:'full',mult:12,name:`${fy}年度`};
+  if(same(halfMonthsOf(fy,1)))return {key:'h1',mult:6,name:`${fy}年度 上期`};
+  if(same(halfMonthsOf(fy,2)))return {key:'h2',mult:6,name:`${fy}年度 下期`};
+  for(let q=0;q<4;q++){
+    if(same([0,1,2].map(i=>fyMonth(fy,q*3+i)))) return {key:'q'+(q+1),mult:3,name:`${fy}年度 Q${q+1}`};
+  }
+  return {key:null,mult:n,name:null};
+}
 
-  // 右側の「入金ベース」は決済日(AE3)ではなく、手数料の入金完了日(L27/Z27/L30/Z30)で集計する
-  const halfK=computeStats('keiyaku',hMonths), halfN=computeStats('nyukin',hMonths);
-  const curK =computeStats('keiyaku',curMonths), curN=computeStats('nyukin',curMonths);
+function achievementDashboard(fy,months){
+  // 表示期間は画面上部の「表示モード」の選択にそのまま追従する。
+  // ①上半分：選択月が属する半期（年度モードのときは上期・下期を両方）＝いま半期のどこにいるかの固定指標
+  // ②下半分：選択期間そのもの＝上のサマリー・明細と必ず一致する
+  const now=new Date();
+  const ms=(months&&months.length)?months:[{year:now.getFullYear(),month:now.getMonth()+1}];
+  const pk=periodTargetKey(fy,ms);
+  const h=halfOfMonth(ms[0].month);
 
   const teamName='A';
   const individuals=(targetData?Object.keys(targetData):[])
     .filter(n=>!TARGET_EXCLUDED_STAFF.has(n)&&n!=='部署'&&n!==`${teamName}チーム`&&n!=='Aチーム')
     .sort((a,b)=>((targetData[b]?.h1||0)+(targetData[b]?.h2||0))-((targetData[a]?.h1||0)+(targetData[a]?.h2||0)));
+  const rowKeys=['部署','Aチーム',...individuals];
 
-  const targetOf=(rowKey,h)=>{
-    if(!targetData)return 0;
-    const key=h===1?'h1':'h2';
-    if(rowKey==='部署') return targetData['部署']?.[key]||0;
-    if(rowKey==='Aチーム') return targetData['Aチーム']?.[key]||0;
-    return targetData[rowKey]?.[key]||0;
+  // 目標額の解決：該当キーがあればそれを使う。
+  // 四半期が未設定なら半期÷2、それも無ければ「1ヶ月あたりの目標×月数」で按分する。
+  const tgtOf=(rowKey,key,mult)=>{
+    const t=targetData?targetData[rowKey]:null; if(!t)return 0;
+    if(key&&t[key])return t[key];
+    if((key==='q1'||key==='q2')&&t.h1)return Math.round(t.h1/2);
+    if((key==='q3'||key==='q4')&&t.h2)return Math.round(t.h2/2);
+    const per=t.m||(t.full?Math.round(t.full/12):0);
+    return per*(mult||1);
   };
-  // 月次目標（当月セクション用）。1ヶ月分の目標額。
-  const monthTargetOf=(rowKey)=>{
-    if(!targetData)return 0;
-    if(rowKey==='部署') return targetData['部署']?.m||0;
-    if(rowKey==='Aチーム') return targetData['Aチーム']?.m||0;
-    return targetData[rowKey]?.m||0;
+  // 目標の出どころを明示する注記
+  const tgtNote=(key,mult)=>{
+    if(key==='m')   return '月次目標';
+    if(key==='full')return '通期目標';
+    if(key==='h1'||key==='h2') return '半期目標';
+    if(key&&key[0]==='q')      return '四半期目標（未設定なら半期÷2）';
+    return `月次目標×${mult}ヶ月`;
   };
+
   // 内訳付きで実績を返す：{chukai, shiire, total}
   const actualOf=(rowKey,stats)=>{
     if(rowKey==='部署') return totalOfStats(stats);
@@ -1713,7 +1729,6 @@ function achievementDashboard(fy,selMonth){
     const o=stats.per.get(rowKey);
     return o?{chukai:o.chukai,shiire:o.shiire,total:o.chukai+o.shiire}:{chukai:0,shiire:0,total:0};
   };
-  const rowKeys=['部署','Aチーム',...individuals];
 
   // 色定義：契約系＝青系（濃=仲介／淡=仕入）、入金系＝緑系（濃=仲介／淡=仕入）
   const C={contractC:'#2563eb',contractS:'#60a5fa',cashC:'#16a34a',cashS:'#86efac'};
@@ -1740,58 +1755,61 @@ function achievementDashboard(fy,selMonth){
     </div>`;
   };
 
-  // ---------- セクション①：半期達成率（左＝契約ベース、右＝入金ベース）----------
-  const halfMaxK=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfK).total)));
-  const halfMaxN=Math.max(1,...rowKeys.map(k=>Math.max(targetOf(k,h),actualOf(k,halfN).total)));
-  const halfRow=(rowKey)=>{
-    const tgt=targetOf(rowKey,h);
-    const aK=actualOf(rowKey,halfK), aN=actualOf(rowKey,halfN);
-    const detail=(a)=>a.shiire?`<div style="font-size:9px;color:var(--text3);">仲 ${yen(a.chukai)} ／ 仕 ${yen(a.shiire)}</div>`:'';
-    return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
-      <div>
-        <b>${rowKey}</b>
-        <div style="font-size:10px;color:var(--text3);">${tgt?`目標 ${yen(tgt)}`:'目標未設定'}</div>
-      </div>
-      <div>${stackBar(aK,tgt,halfMaxK,C.contractC,C.contractS)}${detail(aK)}</div>
-      <div>${stackBar(aN,tgt,halfMaxN,C.cashC,C.cashS)}${detail(aN)}</div>
-    </div>`;
-  };
-
-  // ---------- セクション②：当月実績（月次目標との対比）----------
-  const curMaxK=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curK).total)));
-  const curMaxN=Math.max(1,...rowKeys.map(k=>Math.max(monthTargetOf(k),actualOf(k,curN).total)));
-  const curRow=(rowKey)=>{
-    const tgt=monthTargetOf(rowKey);
-    const aK=actualOf(rowKey,curK), aN=actualOf(rowKey,curN);
-    const detail=(a)=>a.shiire?`<div style="font-size:9px;color:var(--text3);">仲 ${yen(a.chukai)} ／ 仕 ${yen(a.shiire)}</div>`:'';
-    return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
-      <div>
-        <b>${rowKey}</b>
-        <div style="font-size:10px;color:var(--text3);">${tgt?`月目標 ${yen(tgt)}`:'目標未設定'}</div>
-      </div>
-      <div>${stackBar(aK,tgt,curMaxK,C.contractC,C.contractS)}${detail(aK)}</div>
-      <div>${stackBar(aN,tgt,curMaxN,C.cashC,C.cashS)}${detail(aN)}</div>
-    </div>`;
-  };
-
   const swatch=(color,label)=>`<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:12px;height:8px;background:${color};display:inline-block;border-radius:2px;"></span>${label}</span>`;
-  const legendHalf=`<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:0 12px;font-size:11px;color:var(--text3);margin-bottom:4px;">
+  const legend=`<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:0 12px;font-size:11px;color:var(--text3);margin-bottom:4px;">
     <div></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">契約：${swatch(C.contractC,'仲介')} ${swatch(C.contractS,'仕入')}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">入金：${swatch(C.cashC,'仲介')} ${swatch(C.cashS,'仕入')}</div>
   </div>`;
 
-  return `
-    <div class="section-title" style="margin-top:20px;">${halfLabel} 達成状況</div>
-    <div style="font-size:11px;color:var(--text3);margin:-4px 0 8px;">半期累計 vs 半期目標（黒縦線＝目標位置）</div>
-    ${legendHalf}
-    ${rowKeys.map(halfRow).join('')}
+  // ---------- 汎用セクション描画 ----------
+  // 任意の月リストに対して、左＝契約ベース／右＝入金ベースの2本を並べる。
+  const buildSection=(title,sub,secMonths,tgtFn,tgtLabel)=>{
+    const sK=computeStats('keiyaku',secMonths), sN=computeStats('nyukin',secMonths);
+    const maxK=Math.max(1,...rowKeys.map(k=>Math.max(tgtFn(k),actualOf(k,sK).total)));
+    const maxN=Math.max(1,...rowKeys.map(k=>Math.max(tgtFn(k),actualOf(k,sN).total)));
+    const detail=a=>a.shiire?`<div style="font-size:9px;color:var(--text3);">仲 ${yen(a.chukai)} ／ 仕 ${yen(a.shiire)}</div>`:'';
+    const row=rowKey=>{
+      const tgt=tgtFn(rowKey);
+      const aK=actualOf(rowKey,sK), aN=actualOf(rowKey,sN);
+      return `<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:16px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;margin-bottom:6px;align-items:center;">
+        <div>
+          <b>${rowKey}</b>
+          <div style="font-size:10px;color:var(--text3);">${tgt?`${tgtLabel} ${yen(tgt)}`:'目標未設定'}</div>
+        </div>
+        <div>${stackBar(aK,tgt,maxK,C.contractC,C.contractS)}${detail(aK)}</div>
+        <div>${stackBar(aN,tgt,maxN,C.cashC,C.cashS)}${detail(aN)}</div>
+      </div>`;
+    };
+    return `
+      <div class="section-title" style="margin-top:20px;">${title}</div>
+      <div style="font-size:11px;color:var(--text3);margin:-4px 0 8px;">${sub}</div>
+      ${legend}
+      ${rowKeys.map(row).join('')}`;
+  };
 
-    <div class="section-title" style="margin-top:20px;">${curLabel} 達成状況</div>
-    <div style="font-size:11px;color:var(--text3);margin:-4px 0 8px;">当月実績 vs 月次目標（黒縦線＝目標位置）</div>
-    ${legendHalf}
-    ${rowKeys.map(curRow).join('')}
-  `;
+  // ---------- ①半期（年度モードなら上期・下期を両方）----------
+  const halfSec=(hh)=>buildSection(
+    `${fy}年度 ${hh===1?'上期（4〜9月）':'下期（10〜3月）'} 達成状況`,
+    '半期累計 vs 半期目標（黒縦線＝目標位置）',
+    halfMonthsOf(fy,hh),
+    k=>tgtOf(k,hh===1?'h1':'h2',6),
+    '半期目標');
+  const halfPart=(pk.key==='full')?(halfSec(1)+halfSec(2)):halfSec(h);
+
+  // ---------- ②選択期間そのもの ----------
+  // 選択が半期ぴったりのときは①と全く同じ内容になるので省略する。
+  const a=ms[0], b=ms[ms.length-1];
+  const span=`${a.year}年${a.month}月〜${b.year}年${b.month}月`;
+  const selLabel=(ms.length===1)?pk.name:(pk.name?`${pk.name}（${span}）`:span);
+  const selPart=(pk.key==='h1'||pk.key==='h2')?'':buildSection(
+    `${selLabel} 達成状況`,
+    `選択期間の実績 vs ${tgtNote(pk.key,pk.mult)}（黒縦線＝目標位置）`,
+    ms,
+    k=>tgtOf(k,pk.key,pk.mult),
+    pk.key==='m'?'月目標':'期間目標');
+
+  return halfPart+selPart;
 }
 
 
