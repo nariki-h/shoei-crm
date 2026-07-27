@@ -324,6 +324,8 @@ td.sub{color:var(--text-sub);}
 .st-終了{background:#f5f5f5;color:#6b7280;}
 .st-紹介不可{background:#fef2ee;color:#c0392b;}
 .dot-notify{color:var(--success);font-weight:700;}
+.copybtn{margin-left:6px;padding:2px 7px;font-size:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-sub);border-radius:5px;cursor:pointer;}
+.copybtn:hover{border-color:var(--accent);color:var(--accent);}
 .tblcount{padding:6px 16px;font-size:11px;color:var(--text-muted);background:var(--bg);border-bottom:1px solid var(--border);flex-shrink:0;}
 .noresult{padding:48px;text-align:center;color:var(--text-muted);font-size:13px;}
 
@@ -453,6 +455,7 @@ const F={title:'Title',pub:'PubStatus',sale:'SaleStatus',acq:'AcquiredDate',chk:
   type:'PropType',price:'PriceMan',fprice:'FirstPriceMan',fnote:'FirstPriceNote',band:'PriceBand',
   pref:'Pref',ward:'Ward',addr:'Address',daddr:'DispAddress',area:'Area',
   l1:'Line1',s1:'Station1',w1:'Walk1',l2:'Line2',s2:'Station2',w2:'Walk2',
+  l3:'Line3',s3:'Station3',w3:'Walk3',
   land:'LandArea',bldg:'BuildingArea',layout:'Layout',
   sc:'SellerCompany',sn:'SellerContact',st:'SellerTel',intro:'IntroOK',inote:'IntroNote',memo:'Memo',
   src:'SourceUrl',folder:'FolderUrl',pdf:'CustomerPdfUrl',other:'OtherDocUrl',
@@ -600,7 +603,7 @@ function filtered(){
     const a=nv(i[F.land]);
     if(amin!==null&&(a===null||a<amin))return false;
     if(amax!==null&&(a===null||a>amax))return false;
-    if(q&&![i[F.title],i[F.addr],i[F.daddr],i[F.ward],i[F.s1],i[F.s2],i[F.sc],i[F.sn]].some(v=>String(v||'').includes(q)))return false;
+    if(q&&![i[F.title],i[F.addr],i[F.daddr],i[F.ward],i[F.s1],i[F.s2],i[F.s3],i[F.sc],i[F.sn]].some(v=>String(v||'').includes(q)))return false;
     return true;
   });
   r.sort((a,b)=>{
@@ -624,17 +627,26 @@ const COLS=[
   {k:F.bldg,l:'建物㎡',c:'num'},
   {k:F.ward,l:'市区'},
   {k:F.s1,l:'最寄駅'},
+  {k:F.pdf,l:'顧客向けPDF',nosort:true},
+  {k:F.sc,l:'売主会社'},
+  {k:F.sn,l:'売主担当'},
   {k:F.sale,l:'状況'},
   {k:F.acq,l:'取得日'},
   {k:F.nf,l:'通知'}
 ];
+function pdfCell(i){
+  const u=urlOf(i[F.pdf]);
+  if(!u)return '<span style="color:var(--text-muted);font-size:11px;">—</span>';
+  return `<a href="${esc(u)}" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);text-decoration:none;">PDF</a>
+    <button class="copybtn" onclick="event.stopPropagation();copyLink('${esc(u)}')">コピー</button>`;
+}
 function fmtN(v){return v===null||v===undefined||v===''?'':Number(v).toLocaleString();}
 function fmtD(v){return v?String(v).slice(0,10).replace(/-/g,'/'):'';}
 function renderList(){
   const rows=filtered();
   document.getElementById('count').textContent=`${rows.length} 件 / 全 ${items.length} 件`;
   if(!rows.length){document.getElementById('tbl').innerHTML='<div class="noresult">条件に合う物件がありません</div>';return;}
-  const head=COLS.map(c=>`<th onclick="sortBy('${c.k}')">${c.l}${sortKey===c.k?` <span class="ar">${sortDir>0?'▲':'▼'}</span>`:''}</th>`).join('');
+  const head=COLS.map(c=>c.nosort?`<th style="cursor:default;">${c.l}</th>`:`<th onclick="sortBy('${c.k}')">${c.l}${sortKey===c.k?` <span class="ar">${sortDir>0?'▲':'▼'}</span>`:''}</th>`).join('');
   const body=rows.map(i=>`<tr onclick="select(${i.Id})">
     <td class="nm">${esc(i[F.title]||'(名称未設定)')}</td>
     <td class="sub">${esc(i[F.type]||'')}</td>
@@ -643,6 +655,9 @@ function renderList(){
     <td class="num sub">${fmtN(i[F.bldg])}</td>
     <td class="sub">${esc(i[F.ward]||'')}</td>
     <td class="sub">${esc(i[F.s1]||'')}${i[F.w1]?` 徒${i[F.w1]}`:''}</td>
+    <td>${pdfCell(i)}</td>
+    <td class="sub">${esc(i[F.sc]||'')}</td>
+    <td class="sub">${esc(i[F.sn]||'')}</td>
     <td><span class="st-pill st-${esc(i[F.sale]||'販売中')}">${esc(i[F.sale]||'—')}</span></td>
     <td class="sub">${fmtD(i[F.acq])}</td>
     <td>${i[F.nf]?'<span class="dot-notify">● 待ち</span>':''}</td>
@@ -707,6 +722,9 @@ function renderForm(){
       <div class="fi"><label>沿線2</label><select id="f_l2" onchange="onLine(2)">${opt(lines,i[F.l2])}</select></div>
       <div class="fi"><label>駅2</label><select id="f_s2">${opt(stations(i[F.l2]),i[F.s2])}</select></div>
       <div class="fi"><label>徒歩2（分）</label><input id="f_w2" type="number" value="${i[F.w2]??''}"></div>
+      <div class="fi"><label>沿線3</label><select id="f_l3" onchange="onLine(3)">${opt(lines,i[F.l3])}</select></div>
+      <div class="fi"><label>駅3</label><select id="f_s3">${opt(stations(i[F.l3]),i[F.s3])}</select></div>
+      <div class="fi"><label>徒歩3（分）</label><input id="f_w3" type="number" value="${i[F.w3]??''}"></div>
       <div class="fi"><label>土地面積（㎡）</label><input id="f_land" type="number" step="0.01" value="${i[F.land]??''}"></div>
       <div class="fi"><label>建物面積（㎡）</label><input id="f_bldg" type="number" step="0.01" value="${i[F.bldg]??''}"></div>
       <div class="fi"><label>間取り</label><input id="f_layout" value="${esc(i[F.layout]||'')}" placeholder="3LDK"></div>
@@ -742,9 +760,9 @@ function renderForm(){
       ${i.Id?`
       <div class="fi full"><label>この資料の種類</label>
         <select id="f_kind">
-          <option value="src">元データ（マイソク・元Excel等）</option>
           <option value="pdf">顧客向けPDF（売主情報を落としたもの）</option>
           <option value="other">その他資料</option>
+          <option value="src">元データ（マイソク・元Excel等）</option>
         </select></div>
       <div class="dz" id="dz" onclick="document.getElementById('picker').click()">
         ここにファイルをドラッグ＆ドロップ（クリックで選択）<br>
@@ -752,9 +770,9 @@ function renderForm(){
       </div>
       <input type="file" id="picker" style="display:none" multiple onchange="handleFiles(this.files)">
       `:`<div class="warnbox">ファイルを添付するには、先に「保存」して物件を登録してください（保存後にフォルダが作られます）。</div>`}
-      ${fileRow('元データ',urlOf(i[F.src]))}
       ${fileRow('顧客向けPDF',urlOf(i[F.pdf]),true)}
       ${fileRow('その他資料',urlOf(i[F.other]))}
+      ${fileRow('元データ',urlOf(i[F.src]))}
       ${fileRow('物件フォルダ',urlOf(i[F.folder]))}
     </div>
   </div>
@@ -792,6 +810,7 @@ function collect(){
   b[F.intro]=val('f_intro');b[F.acq]=dat('f_acq');b[F.chk]=dat('f_chk');
   b[F.l1]=val('f_l1');b[F.s1]=val('f_s1');b[F.w1]=num('f_w1');
   b[F.l2]=val('f_l2');b[F.s2]=val('f_s2');b[F.w2]=num('f_w2');
+  b[F.l3]=val('f_l3');b[F.s3]=val('f_s3');b[F.w3]=num('f_w3');
   b[F.land]=num('f_land');b[F.bldg]=num('f_bldg');b[F.layout]=val('f_layout');
   b[F.area]=val('f_area');b[F.band]=val('f_band');
   b[F.sc]=val('f_sc');b[F.sn]=val('f_sn');b[F.st]=val('f_st');b[F.inote]=val('f_inote');
