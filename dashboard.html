@@ -874,7 +874,7 @@ function firstContactMap(logs){
     const t=new Date(dstr).getTime();
     if(isNaN(t)) continue;
     const cur=map.get(cid);
-    if(!cur||t<cur.t) map.set(cid,{t,date:dstr,owner:l['OData__x62c5__x5f53__x8005_']||''});
+    if(!cur||t<cur.t) map.set(cid,{t,date:dstr,owner:l['OData__x62c5__x5f53__x8005_']||'',title:l.Title||'',logId:l.ID});
   }
   _fcCache={logs,map};
   return map;
@@ -988,12 +988,26 @@ function openKpiDetail(metric,staffIdx){
   const caseById=new Map(cases.map(c=>[String(c.ID),c]));
   const nameOfCust=c=>c?(c.Title||'(名称未設定)'):'(顧客不明)';
   const d10=v=>String(v||'').slice(0,10);
-  // 活動履歴の「案件ID」列にはCRM側から顧客IDが入る。まず顧客、無ければ案件で引く。
-  const custOfLogKey=cid=>{
-    const c=custById.get(String(cid)); if(c)return c;
-    const cs=caseById.get(String(cid));
-    return cs?custById.get(String(cs['OData__x9867__x5ba2_ID'])):null;
+
+  /* 活動履歴の「案件ID」列にはCRM側から顧客IDが入る。
+     ①顧客IDで一致 → ②案件IDとみなして案件経由 → ③活動履歴のタイトル
+     （CRMは「顧客名_種別_日付」で作る）から推定 → ④不明。
+     ②③に落ちるのは顧客リストから消えた顧客の履歴が残っているケースが大半。 */
+  const resolveByKey=(key,title)=>{
+    const k=String(key||'');
+    const c=custById.get(k);
+    if(c) return {name:c.Title||'(名称未設定)',link:'OK'};
+    const cs=caseById.get(k);
+    if(cs){
+      const c2=custById.get(String(cs['OData__x9867__x5ba2_ID']||''));
+      if(c2) return {name:c2.Title||'(名称未設定)',link:'案件経由'};
+    }
+    const t=String(title||'');
+    const guess=t.includes('_')?t.split('_')[0].trim():'';
+    if(guess) return {name:guess,link:'⚠記録名から推定（顧客リストに無し）'};
+    return {name:'顧客不明',link:'⚠紐付け先なし'};
   };
+  let orphan=0;
 
   let head=[],rows=[];
   if(metric==='hankyo'){
@@ -1003,38 +1017,52 @@ function openKpiDetail(metric,staffIdx){
                c['OData__x53cd__x97ff__x5a92__x4f53_']||'',c['OData__x53cd__x97ff__x7269__x4ef6_']||'',
                c['OData__x30e9__x30f3__x30af_']||'']);
   }else if(metric==='contact'){
-    head=['初回接触日','顧客名','担当者（活動）'];
+    head=['初回接触日','顧客名','紐付け','担当者（活動）','案件ID列の値','活動ID'];
     rows=list.slice().sort((a,b)=>d10(b.date).localeCompare(d10(a.date)))
-      .map(x=>[d10(x.date),nameOfCust(custOfLogKey(x.cid)),x.owner||'']);
+      .map(x=>{
+        const rv=resolveByKey(x.cid,x.title); if(rv.link!=='OK')orphan++;
+        return [d10(x.date),rv.name,rv.link,x.owner||'',String(x.cid||''),String(x.logId||'')];
+      });
   }else if(metric==='keiyaku'){
-    head=['契約日','顧客名','案件','フェーズ','担当者（顧客）'];
+    head=['契約日','顧客名','紐付け','案件','フェーズ','担当者（顧客）','顧客ID列の値','案件ID'];
     rows=list.slice().sort((a,b)=>d10(keiyakuDate(b)).localeCompare(d10(keiyakuDate(a))))
       .map(cs=>{
-        const cu=custById.get(String(cs['OData__x9867__x5ba2_ID']));
-        return [d10(keiyakuDate(cs)),nameOfCust(cu),
+        const key=String(cs['OData__x9867__x5ba2_ID']||'');
+        const cu=custById.get(key);
+        const link=cu?'OK':'⚠紐付け先なし'; if(!cu)orphan++;
+        return [d10(keiyakuDate(cs)),nameOfCust(cu),link,
                 cs['OData__x6848__x4ef6__x30e9__x30d9__x30']||cs.Title||'',
                 cs['OData__x30d5__x30a7__x30fc__x30ba_']||'',
-                cu?(cu['OData__x62c5__x5f53__x8005_']||''):''];
+                cu?(cu['OData__x62c5__x5f53__x8005_']||''):'',
+                key,String(cs.ID||'')];
       });
   }else{
-    head=['日付','顧客名','種別','担当者（活動）','内容'];
+    head=['日付','顧客名','紐付け','種別','担当者（活動）','内容','案件ID列の値','活動ID'];
     rows=list.slice().sort((a,b)=>d10(b['OData__x65e5__x4ed8_']).localeCompare(d10(a['OData__x65e5__x4ed8_'])))
-      .map(l=>[d10(l['OData__x65e5__x4ed8_']),
-               nameOfCust(custOfLogKey(l['OData__x6848__x4ef6_ID'])),
-               l['OData__x7a2e__x5225_']||'',
-               l['OData__x62c5__x5f53__x8005_']||'',
-               l['OData__x5185__x5bb9_']||'']);
+      .map(l=>{
+        const key=l['OData__x6848__x4ef6_ID'];
+        const rv=resolveByKey(key,l.Title); if(rv.link!=='OK')orphan++;
+        return [d10(l['OData__x65e5__x4ed8_']),rv.name,rv.link,
+                l['OData__x7a2e__x5225_']||'',
+                l['OData__x62c5__x5f53__x8005_']||'',
+                l['OData__x5185__x5bb9_']||'',
+                String(key||''),String(l.ID||'')];
+      });
   }
 
   const a=months[0],b=months[months.length-1];
   const span=months.length===1?`${a.year}年${a.month}月`:`${a.year}年${a.month}月〜${b.year}年${b.month}月`;
   document.getElementById('kpi-modal-title').textContent=`${meta.label}　${rows.length}件　－　${staff||'合計（仲介事業部）'}`;
   document.getElementById('kpi-modal-sub').textContent=`対象期間：${span}`;
-  document.getElementById('kpi-modal-rule').innerHTML='<b>数え方：</b>'+meta.rule;
+  document.getElementById('kpi-modal-rule').innerHTML='<b>数え方：</b>'+meta.rule
+    +(orphan?`<div style="margin-top:6px;color:#b45309;"><b>⚠ ${orphan}件が顧客リストと紐付きません。</b>
+       CRMで顧客を削除しても案件・活動履歴は残るため、削除済み顧客の履歴が件数に乗っている可能性があります。
+       「案件ID列の値」「活動ID」でSharePointの該当リストを検索すると現物を確認できます。</div>`:'');
   document.getElementById('kpi-modal-body').innerHTML=rows.length?`
     <div class="uri-table-wrap"><table class="uri">
       <thead><tr>${head.map(h=>`<th class="left">${h}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map(r=>`<tr>${r.map(v=>`<td class="left">${escH(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+      <tbody>${rows.map(r=>{const ng=r.includes('⚠紐付け先なし')||r.some(v=>String(v).startsWith('⚠記録名'));
+        return `<tr${ng?' style="background:#fffbeb;"':''}>${r.map(v=>`<td class="left"${String(v).startsWith('⚠')?' style="color:#b45309;font-size:11px;"':''}>${escH(v)}</td>`).join('')}</tr>`;}).join('')}</tbody>
     </table></div>`
     :'<div class="uri-empty">該当する明細がありません</div>';
   kpiCsvCache={name:`${meta.label}_${staff||'合計'}_${span}`,head,rows};
