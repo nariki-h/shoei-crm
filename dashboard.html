@@ -757,7 +757,7 @@ async function loadData(){
       spGetItems('担当者マスター')
     ]);
 
-    const staffList=staffItems.map(s=>s.Title).filter(Boolean).filter(n=>!EXCLUDED_STAFF.has(n));
+    const staffList=salesStaffNames(staffItems);
     if(staffList.length===0)staffList.push('金光善慶','馬場 宏一','村上光南','成木健介');
     staffListCache=staffList;
 
@@ -807,6 +807,18 @@ async function loadData(){
 // 集計除外担当：CRM上は担当者として使うが、KPI集計・合計・推移には一切含めない。
 // 今後除外を増やす場合はこの配列に名前を足すだけでOK（顧客リスト側の表示には影響しない）。
 const EXCLUDED_STAFF=new Set(['CO事業部','その他']);
+/* 担当者マスターの「役職」列が下記のいずれかの人は、KPI・売上の集計から丸ごと外す。
+   事務(office)や閲覧のみ(viewer)は数字が付かないので、担当者リストにも目標にも出さない。
+   人が増えたらSharePointの役職を設定するだけでよく、ここを編集する必要はない。 */
+const NON_SALES_ROLES=new Set(['office','viewer','事務','閲覧','閲覧のみ']);
+const staffRoleOf=item=>String(item['OData__x5f79__x8077_']||item['役職']||'').trim();
+// 担当者マスターのアイテム配列 → 集計対象の氏名配列
+function salesStaffNames(items){
+  const isNonSales=r=>NON_SALES_ROLES.has(r)||NON_SALES_ROLES.has(r.toLowerCase());
+  return (items||[])
+    .filter(s=>s.Title&&!EXCLUDED_STAFF.has(s.Title)&&!isNonSales(staffRoleOf(s)))
+    .map(s=>s.Title);
+}
 // 担当者判定：staff指定時は完全一致、null（=全体集計）時は「KPI表に行がある担当者」だけ。
 // 旧実装は !EXCLUDED_STAFF.has(owner) だったため、担当者が空欄の顧客や
 // 担当者マスターに存在しない名前まで合計に混入し、内訳の和と合計が食い違っていた。
@@ -2247,7 +2259,7 @@ async function ensureStaffLoaded(){
   if(staffListCache&&staffListCache.length) return;
   try{
     const items=await spGetItems('担当者マスター');
-    const list=items.map(s=>s.Title).filter(Boolean).filter(n=>!EXCLUDED_STAFF.has(n));
+    const list=salesStaffNames(items);
     if(list.length) staffListCache=list;
   }catch(e){/* 失敗時はフォールバック名で続行 */}
 }
