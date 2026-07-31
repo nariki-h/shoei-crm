@@ -225,6 +225,10 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .log-date{font-size:11px;color:var(--text-muted);}
 .log-staff{font-size:11px;color:var(--text-sub);margin-left:auto;}
 .log-memo{font-size:12px;color:var(--text);line-height:1.5;}
+/* 閲覧専用（役職=viewer）：追加・削除系のボタンを隠す */
+body.readonly .act-btn[onclick^="deleteCustomer"],
+body.readonly #new-btn,
+body.readonly #import-btn{display:none!important;}
 
 /* 「一覧に戻る」ボタン（モバイル専用・PCでは非表示） */
 .back-btn{display:none;align-items:center;gap:4px;padding:8px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;}
@@ -403,6 +407,18 @@ const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All','User.Read'];
 
 let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0;
 let currentRole="member", currentTeam="", currentStaffName="";
+/* 担当者マスターの「役職」列で権限が決まる。
+   admin   … 全件閲覧・編集・CSV取込
+   manager … 自チームの顧客を閲覧・編集
+   member  … 自分の顧客のみ
+   office  … 事務。全件閲覧・編集できるが、KPI/売上の集計には一切出さない
+   viewer  … 閲覧のみ。全件見えるが編集不可。KPI/売上にも出さない
+   office / viewer はダッシュボードの担当者リストから自動的に外れるので、
+   人が増えてもコードを触る必要はない（役職を設定するだけ）。 */
+const ROLE_VIEW_ALL=new Set(['admin','office','viewer']);   // 全件見える役職
+const ROLE_NON_SALES=new Set(['office','viewer']);          // 担当者として割り当てない＝KPI対象外
+const ROLE_READONLY=new Set(['viewer']);                    // 書き込み禁止
+function canEdit(){return !ROLE_READONLY.has(currentRole);}
 
 // フェーズ複数選択フィルタ（初期は完了系4フェーズを外す）
 const COMPLETED_PHASES=['契約済','融資承認','決済済','終了'];
@@ -428,7 +444,7 @@ function renderStaffFilterOptions(){
   const sel=document.getElementById('filter-staff');
   if(!sel)return;
   let names;
-  if(currentRole==='admin') names=(window.STAFF_LIST||[]);
+  if(ROLE_VIEW_ALL.has(currentRole)) names=(window.STAFF_LIST||[]);
   else if(currentRole==='manager') names=Object.keys(window.STAFF_MAP||{}).filter(n=>window.STAFF_MAP[n].team===currentTeam);
   else names=[currentStaffName];
   const cur=sel.value;
@@ -525,7 +541,11 @@ async function getListType(list,token){
   return type;
 }
 
+function assertEditable(){
+  if(!canEdit()){ showToast('閲覧専用のアカウントのため変更できません',true); throw new Error('read-only'); }
+}
 async function spAdd(list,body){
+  assertEditable();
   const token=await getToken();
   const type=await getListType(list,token);
   body.__metadata={type};
@@ -538,6 +558,7 @@ async function spAdd(list,body){
 }
 
 async function spUpdate(list,id,body){
+  assertEditable();
   const token=await getToken();
   const type=await getListType(list,token);
   body.__metadata={type};
@@ -553,11 +574,15 @@ async function loadStaff(){
     const items=await spGetItems('担当者マスター');
     window.STAFF_MAP={}; // 名前→{role,team}のマップ
     items.forEach(i=>{
-      window.STAFF_MAP[i.Title]={role:i['OData__x5f79__x8077_']||'member',team:i['OData__x30c1__x30fc__x30e0_']||''};
+      window.STAFF_MAP[i.Title]={role:String(i['OData__x5f79__x8077_']||'member').trim(),team:i['OData__x30c1__x30fc__x30e0_']||''};
     });
-    return items.map(i=>i.Title);
+    // 顧客・活動の「担当者」に出すのは営業だけ（事務・閲覧者は割り当て対象外）
+    window.SALES_LIST=items.map(i=>i.Title).filter(Boolean)
+      .filter(n=>!ROLE_NON_SALES.has((window.STAFF_MAP[n]||{}).role));
+    return items.map(i=>i.Title).filter(Boolean);
   }catch(e){
     window.STAFF_MAP={};
+    window.SALES_LIST=['金光善慶','馬場紘一','村上光南'];
     return ['金光善慶','馬場紘一','村上光南'];
   }
 }
@@ -572,6 +597,7 @@ async function loadCustomers(){
     currentRole=myInfo.role;
     currentTeam=myInfo.team;
     document.getElementById('import-btn').style.display=(currentRole==='admin')?'block':'none';
+    if(!canEdit()) document.body.classList.add('readonly');
     renderStaffFilterOptions();
     const items=await spGetItems('顧客リスト');
     customers=items.map(i=>({
@@ -637,7 +663,7 @@ function renderList(){
   const fs=document.getElementById('filter-staff')?.value||'';
   const sort=document.getElementById('sort-select')?.value||'';
   // 権限レベルによる顧客フィルタリング
-  const visibleStaff=currentRole==='admin'?null:
+  const visibleStaff=ROLE_VIEW_ALL.has(currentRole)?null:
     currentRole==='manager'?Object.keys(window.STAFF_MAP||{}).filter(n=>(window.STAFF_MAP[n].team===currentTeam)):
     [currentStaffName];
   // フェーズ複数選択（全選択または未選択のときは絞り込みなし）
@@ -716,7 +742,7 @@ function renderDetail(){
           <div class="field-item"><span class="fl">カナ</span><div class="fv"><input value="${c.kana}" onchange="cf(${c.id},'kana',this.value)"/></div></div>
           <div class="field-item"><span class="fl">種別</span><div class="fv"><select onchange="cf(${c.id},'type',this.value)"><option${c.type==='個人'?' selected':''}>個人</option><option${c.type==='法人'?' selected':''}>法人</option></select></div></div>
           <div class="field-item"><span class="fl">ランク</span><div class="fv"><select onchange="cf(${c.id},'rank',this.value)">${RANKS.map(r=>`<option${c.rank===r?' selected':''}>${r}</option>`).join('')}</select></div></div>
-          <div class="field-item"><span class="fl">担当者</span><div class="fv"><select onchange="cf(${c.id},'staff',this.value)"><option value="">未設定</option>${(window.STAFF_LIST||[]).map(s=>`<option${c.staff===s?' selected':''}>${s}</option>`).join('')}</select></div></div>
+          <div class="field-item"><span class="fl">担当者</span><div class="fv"><select onchange="cf(${c.id},'staff',this.value)"><option value="">未設定</option>${(window.SALES_LIST||[]).map(s=>`<option${c.staff===s?' selected':''}>${s}</option>`).join('')}</select></div></div>
           <div class="field-item"><span class="fl">電話番号</span><div class="fv"><input value="${c.tel}" onchange="cf(${c.id},'tel',this.value)" oninput="this.value=this.value.replace(/[^0-9\-]/g,'')" placeholder="例：090-1234-5678"/></div></div>
           <div class="field-item"><span class="fl">メール</span><div class="fv"><input value="${c.email}" onchange="cf(${c.id},'email',this.value)"/></div></div>
           <div class="field-item full"><span class="fl">住所</span><div class="fv"><input value="${c.address}" onchange="cf(${c.id},'address',this.value)"/></div></div>
@@ -752,7 +778,7 @@ function renderDetail(){
             <div class="log-form-row">
               <input type="date" id="log-date" value="${new Date().toISOString().slice(0,10)}"/>
               <select id="log-staff-select" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
-                ${(window.STAFF_LIST||[]).map(s=>`<option value="${s}"${s===(currentUser?.name||'')?' selected':''}>${s}</option>`).join('')}
+                ${(window.SALES_LIST||window.STAFF_LIST||[]).map(s=>`<option value="${s}"${s===(currentUser?.name||'')?' selected':''}>${s}</option>`).join('')}
               </select>
               <span id="log-type-label" style="font-size:12px;font-weight:700;color:var(--accent);"></span>
               <button class="log-save-btn" onclick="saveLog()">記録する</button>
@@ -951,6 +977,7 @@ async function deleteLog(logId, custId){
 // 旧実装は顧客だけを消していたため、案件と活動履歴が孤児として残り、
 // ダッシュボードのKPIに「顧客不明」の案内・来社としてカウントされ続けていた。
 async function deleteCustomer(id){
+  if(!canEdit()){showToast('閲覧専用のアカウントのため削除できません',true);return;}
   const c0=customers.find(x=>x.id===id);
   const nCase=(c0?.cases||[]).filter(x=>x.id).length;
   const nLog=(c0?.logs||[]).filter(x=>x.id).length;
@@ -982,6 +1009,7 @@ async function deleteCustomer(id){
 }
 
 async function newCustomer(){
+  if(!canEdit()){showToast('閲覧専用のアカウントのため追加できません',true);return;}
   showLoading('作成中...');
   try{
     const r=await spAdd('顧客リスト',{Title:'新規顧客'});
