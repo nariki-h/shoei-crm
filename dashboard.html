@@ -239,6 +239,17 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
 .sh-rowbtn{padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card,#fff);color:var(--text2);font-size:12px;cursor:pointer;margin:0 2px;}
 .sh-rowbtn:hover{background:var(--surface);}
 .sh-rowbtn.del:hover{background:#fde8e8;color:#dc2626;border-color:#f5b5b5;}
+/* KPI数字のドリルダウン */
+.drill{cursor:pointer;border-bottom:1px dotted var(--text3);padding:0 2px;}
+.drill:hover{background:#e8f0fe;border-radius:3px;}
+.kpi-modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200;align-items:center;justify-content:center;padding:16px;}
+.kpi-modal.open{display:flex;}
+.kpi-modal-card{background:var(--surface,#fff);border-radius:12px;max-width:1000px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+.kpi-modal-head{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border,#e5e7eb);}
+.kpi-modal-title{font-size:16px;font-weight:700;}
+.kpi-modal-sub{font-size:11px;color:var(--text3);margin-top:2px;}
+.kpi-modal-rule{font-size:11px;line-height:1.6;color:var(--text2);background:#f8fafc;border-bottom:1px solid var(--border,#e5e7eb);padding:8px 16px;}
+.kpi-modal-body{overflow:auto;padding:0 16px 16px;}
 </style>
 </head>
 <body>
@@ -414,6 +425,22 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
        <div id="uri-detail"></div>
      </div>
    </div><!-- /page-uriage -->
+
+   <!-- ===== KPIドリルダウン ===== -->
+   <div id="kpi-modal" class="kpi-modal" onclick="if(event.target===this)closeKpiModal()">
+     <div class="kpi-modal-card">
+       <div class="kpi-modal-head">
+         <div style="flex:1;">
+           <div class="kpi-modal-title" id="kpi-modal-title"></div>
+           <div class="kpi-modal-sub" id="kpi-modal-sub"></div>
+         </div>
+         <button class="refresh-btn" onclick="exportKpiCsv()">⬇ CSV出力</button>
+         <button class="header-btn" onclick="closeKpiModal()">閉じる</button>
+       </div>
+       <div class="kpi-modal-rule" id="kpi-modal-rule"></div>
+       <div class="kpi-modal-body" id="kpi-modal-body"></div>
+     </div>
+   </div>
 
    <!-- ===== 仕入 ===== -->
    <div id="page-shiire" class="page" style="display:none;">
@@ -746,6 +773,8 @@ async function loadData(){
     });
 
     const months=getMonthRange();
+    // KPIドリルダウン用に生データを保持（数字クリック時に同じ条件で再集計する）
+    kpiCache={customers,cases,logs,staffList,months};
 
     document.getElementById('summary-title').textContent=
       currentMode==='year'?`${currentYearDisplay}年度 サマリー`
@@ -872,75 +901,40 @@ function reannaiLogIds(logs){
   return set;
 }
 
+// 単月KPI＝「1ヶ月だけの期間KPI」。定義を1か所に集約して、単月と期間で数え方がズレないようにする。
 function calcKPI(customers, cases, logs, staff, year, month){
-  // 反響数：顧客の登録月×担当者
-  const myCustomers=customers.filter(c=>{
-    const isStaff=ownerIncluded(c['OData__x62c5__x5f53__x8005_']||'',staff);
-    const inM=inMonth(hankyoDate(c),year,month);
-    return isStaff&&inM;
-  });
-  const hankyoCount=myCustomers.length;
-
-  // Contact数：活動履歴の日付月（案内以上の種別）
-
-  const myLogs=logs.filter(l=>{
-    const isStaff=ownerIncluded(l['OData__x62c5__x5f53__x8005_']||'',staff);
-    const inM=inMonth(l['OData__x65e5__x4ed8_'],year,month);
-    return isStaff&&inM;
-  });
-
-  // Contact：案件ごとに「初回接触」の月で1回だけカウント（初めて会った案件のみ）
-  let contactCount=0;
-  firstContactMap(logs).forEach(fc=>{ if(ownerIncluded(fc.owner,staff)&&inMonth(fc.date,year,month)) contactCount++; });
-
-  // 案内数：ANNAI_TYPES全て+1／来社数：RAISHA_TYPES+1／再案内数：同案件2回目以降の案内系活動
-  const annaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
-  const raishaCount=myLogs.filter(l=>RAISHA_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
-  const reIds=reannaiLogIds(logs);
-  const reannaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')&&reIds.has(l.ID)).length;
-
-  // 契約数：案件のフェーズが契約済以上の顧客（案件の更新月で判定→暫定的にフェーズで）
-  const keiyakuPhases=['契約済','融資承認','決済済'];
-  const myContracts=cases.filter(c=>{
-    const custId=c['OData__x9867__x5ba2_ID'];
-    const cust=customers.find(x=>String(x.ID)===custId);
-    if(!cust)return false;
-    const isStaff=ownerIncluded(cust['OData__x62c5__x5f53__x8005_']||'',staff);
-    const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
-    const inM=inMonth(keiyakuDate(c),year,month);
-    return isStaff&&keiyakuPhases.includes(phase)&&inM;
-  });
-
-  const conRate=hankyoCount>0?Math.round(contactCount/hankyoCount*100):null;
-  const raishaRate=annaiCount>0?Math.round(raishaCount/annaiCount*100):null;
-  const seizyakuRate=hankyoCount>0?Math.round(myContracts.length/hankyoCount*100):null;
-
-  return {hankyoCount,contactCount,conRate,annaiCount,raishaCount,reannaiCount,keiyakuCount:myContracts.length,raishaRate,seizyakuRate};
+  return calcKPIPeriod(customers,cases,logs,staff,[{year,month}]);
 }
 
 // 期間合計KPI（複数月をまとめて集計）
 function calcKPIPeriod(customers,cases,logs,staff,months){
   const keiyakuPhases=['契約済','融資承認','決済済'];
 
+  // 反響：顧客リスト側の担当者で数える（活動履歴の担当者ではない）
   const myCustomers=customers.filter(c=>{
     const isStaff=ownerIncluded(c['OData__x62c5__x5f53__x8005_']||'',staff);
     return isStaff&&inPeriod(hankyoDate(c),months);
   });
   const hankyoCount=myCustomers.length;
 
+  // 案内・来社・再案内：活動履歴側の担当者で数える
   const myLogs=logs.filter(l=>{
     const isStaff=ownerIncluded(l['OData__x62c5__x5f53__x8005_']||'',staff);
     return isStaff&&inPeriod(l['OData__x65e5__x4ed8_'],months);
   });
 
   // Contact：案件ごとに「初回接触」が期間内なら1回だけカウント（初めて会った案件のみ）
-  let contactCount=0;
-  firstContactMap(logs).forEach(fc=>{ if(ownerIncluded(fc.owner,staff)&&inPeriod(fc.date,months)) contactCount++; });
-  const annaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
-  const raishaCount=myLogs.filter(l=>RAISHA_TYPES.includes(l['OData__x7a2e__x5225_']||'')).length;
+  const contactList=[];
+  firstContactMap(logs).forEach((fc,cid)=>{
+    if(ownerIncluded(fc.owner,staff)&&inPeriod(fc.date,months)) contactList.push({cid,date:fc.date,owner:fc.owner});
+  });
+  const contactCount=contactList.length;
+  const annaiList=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||''));
+  const raishaList=myLogs.filter(l=>RAISHA_TYPES.includes(l['OData__x7a2e__x5225_']||''));
   const reIds=reannaiLogIds(logs);
-  const reannaiCount=myLogs.filter(l=>ANNAI_TYPES.includes(l['OData__x7a2e__x5225_']||'')&&reIds.has(l.ID)).length;
+  const reannaiList=annaiList.filter(l=>reIds.has(l.ID));
 
+  // 契約：案件のフェーズ＋契約日。担当は案件ではなく顧客リストの担当者を見る。
   const myContracts=cases.filter(c=>{
     const custId=c['OData__x9867__x5ba2_ID'];
     const cust=customers.find(x=>String(x.ID)===custId);
@@ -951,10 +945,114 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
   });
 
   const conRate=hankyoCount>0?Math.round(contactCount/hankyoCount*100):null;
-  const raishaRate=annaiCount>0?Math.round(raishaCount/annaiCount*100):null;
+  const raishaRate=annaiList.length>0?Math.round(raishaList.length/annaiList.length*100):null;
   const seizyakuRate=hankyoCount>0?Math.round(myContracts.length/hankyoCount*100):null;
-  return {hankyoCount,contactCount,conRate,annaiCount,raishaCount,reannaiCount,keiyakuCount:myContracts.length,raishaRate,seizyakuRate};
+  return {hankyoCount,contactCount,conRate,
+    annaiCount:annaiList.length,raishaCount:raishaList.length,reannaiCount:reannaiList.length,
+    keiyakuCount:myContracts.length,raishaRate,seizyakuRate,
+    // 内訳（数字クリック時のドリルダウン用）
+    lists:{hankyo:myCustomers,contact:contactList,annai:annaiList,raisha:raishaList,reannai:reannaiList,keiyaku:myContracts}};
 }
+
+/* ============================================================
+   KPIドリルダウン：数字をクリックすると「その件数の中身」を一覧表示する。
+   どの列の担当者で数えているか（顧客側か活動側か）もヘッダに明記する。
+   ============================================================ */
+let kpiCache=null;          // loadDataで最後に読んだ生データを保持
+let kpiCsvCache=null;       // モーダルで表示中の内容（CSV出力用）
+
+const KPI_METRICS={
+  hankyo:{label:'反響数',
+    rule:'顧客リストの<b>反響時間</b>（空なら作成日）が期間内のもの。担当は<b>顧客リストの担当者</b>で判定。担当者が空欄／CO事業部／その他は除外。'},
+  contact:{label:'Contact数',
+    rule:'案件（顧客）ごとの<b>初回の案内系活動</b>が期間内のものを1件と数える。同じ案件で2回目以降は数えない。担当は<b>その初回活動の担当者</b>。'},
+  annai:{label:'案内数',
+    rule:'活動履歴の種別が<b>案内・再案内・来社・LP・オンライン・その他</b>のもの。日付が期間内の活動をすべて1件ずつ。担当は<b>活動履歴の担当者</b>。'},
+  raisha:{label:'来社数',
+    rule:'活動履歴の種別が<b>来社・LP・オンライン・その他</b>のもの。担当は<b>活動履歴の担当者</b>。'},
+  reannai:{label:'再案内数',
+    rule:'同じ案件で<b>2回目以降</b>の案内系活動。案件ごとに日付の古い順に並べ、2件目以降を数える。担当は<b>活動履歴の担当者</b>。'},
+  keiyaku:{label:'契約数',
+    rule:'案件のフェーズが<b>契約済・融資承認・決済済</b>で、契約日（空なら案件の最終更新日）が期間内のもの。担当は<b>顧客リストの担当者</b>（案件側ではない）。'}
+};
+
+function openKpiDetail(metric,staffIdx){
+  if(!kpiCache){showToast('先に「更新」でデータを読み込んでください',true);return;}
+  const {customers,cases,logs,staffList,months}=kpiCache;
+  const staff=(staffIdx>=0&&staffList[staffIdx])?staffList[staffIdx]:null;
+  const k=calcKPIPeriod(customers,cases,logs,staff,months);
+  const list=(k.lists&&k.lists[metric])||[];
+  const meta=KPI_METRICS[metric]||{label:metric,rule:''};
+
+  const custById=new Map(customers.map(c=>[String(c.ID),c]));
+  const caseById=new Map(cases.map(c=>[String(c.ID),c]));
+  const nameOfCust=c=>c?(c.Title||'(名称未設定)'):'(顧客不明)';
+  const d10=v=>String(v||'').slice(0,10);
+  // 活動履歴の「案件ID」列にはCRM側から顧客IDが入る。まず顧客、無ければ案件で引く。
+  const custOfLogKey=cid=>{
+    const c=custById.get(String(cid)); if(c)return c;
+    const cs=caseById.get(String(cid));
+    return cs?custById.get(String(cs['OData__x9867__x5ba2_ID'])):null;
+  };
+
+  let head=[],rows=[];
+  if(metric==='hankyo'){
+    head=['反響日','顧客名','担当者（顧客）','反響媒体','反響物件','ランク'];
+    rows=list.slice().sort((a,b)=>d10(hankyoDate(b)).localeCompare(d10(hankyoDate(a))))
+      .map(c=>[d10(hankyoDate(c)),nameOfCust(c),c['OData__x62c5__x5f53__x8005_']||'',
+               c['OData__x53cd__x97ff__x5a92__x4f53_']||'',c['OData__x53cd__x97ff__x7269__x4ef6_']||'',
+               c['OData__x30e9__x30f3__x30af_']||'']);
+  }else if(metric==='contact'){
+    head=['初回接触日','顧客名','担当者（活動）'];
+    rows=list.slice().sort((a,b)=>d10(b.date).localeCompare(d10(a.date)))
+      .map(x=>[d10(x.date),nameOfCust(custOfLogKey(x.cid)),x.owner||'']);
+  }else if(metric==='keiyaku'){
+    head=['契約日','顧客名','案件','フェーズ','担当者（顧客）'];
+    rows=list.slice().sort((a,b)=>d10(keiyakuDate(b)).localeCompare(d10(keiyakuDate(a))))
+      .map(cs=>{
+        const cu=custById.get(String(cs['OData__x9867__x5ba2_ID']));
+        return [d10(keiyakuDate(cs)),nameOfCust(cu),
+                cs['OData__x6848__x4ef6__x30e9__x30d9__x30']||cs.Title||'',
+                cs['OData__x30d5__x30a7__x30fc__x30ba_']||'',
+                cu?(cu['OData__x62c5__x5f53__x8005_']||''):''];
+      });
+  }else{
+    head=['日付','顧客名','種別','担当者（活動）','内容'];
+    rows=list.slice().sort((a,b)=>d10(b['OData__x65e5__x4ed8_']).localeCompare(d10(a['OData__x65e5__x4ed8_'])))
+      .map(l=>[d10(l['OData__x65e5__x4ed8_']),
+               nameOfCust(custOfLogKey(l['OData__x6848__x4ef6_ID'])),
+               l['OData__x7a2e__x5225_']||'',
+               l['OData__x62c5__x5f53__x8005_']||'',
+               l['OData__x5185__x5bb9_']||'']);
+  }
+
+  const a=months[0],b=months[months.length-1];
+  const span=months.length===1?`${a.year}年${a.month}月`:`${a.year}年${a.month}月〜${b.year}年${b.month}月`;
+  document.getElementById('kpi-modal-title').textContent=`${meta.label}　${rows.length}件　－　${staff||'合計（仲介事業部）'}`;
+  document.getElementById('kpi-modal-sub').textContent=`対象期間：${span}`;
+  document.getElementById('kpi-modal-rule').innerHTML='<b>数え方：</b>'+meta.rule;
+  document.getElementById('kpi-modal-body').innerHTML=rows.length?`
+    <div class="uri-table-wrap"><table class="uri">
+      <thead><tr>${head.map(h=>`<th class="left">${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r=>`<tr>${r.map(v=>`<td class="left">${escH(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>`
+    :'<div class="uri-empty">該当する明細がありません</div>';
+  kpiCsvCache={name:`${meta.label}_${staff||'合計'}_${span}`,head,rows};
+  document.getElementById('kpi-modal').classList.add('open');
+}
+function closeKpiModal(){document.getElementById('kpi-modal').classList.remove('open');}
+function exportKpiCsv(){
+  if(!kpiCsvCache||!kpiCsvCache.rows.length){showToast('出力する明細がありません',true);return;}
+  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const lines=[kpiCsvCache.head.map(q).join(',')].concat(kpiCsvCache.rows.map(r=>r.map(q).join(',')));
+  const blob=new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=kpiCsvCache.name+'.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(a.href);
+  showToast('CSVを出力しました');
+}
+// KPI表・サマリーの数字をクリック可能にする
+const drill=(metric,staffIdx,val)=>`<span class="drill" onclick="openKpiDetail('${metric}',${staffIdx})" title="内訳を見る">${val}</span>`;
 
 function renderSummaryPeriod(customers,cases,logs,staffList,months){
   const total=calcKPIPeriod(customers,cases,logs,null,months);
@@ -967,61 +1065,61 @@ function renderSummaryPeriod(customers,cases,logs,staffList,months){
   document.getElementById('summary-row').innerHTML=`
     <div class="summary-card">
       <div class="summary-label">反響数（仲介事業部）</div>
-      <div class="summary-val">${total.hankyoCount}</div>
+      <div class="summary-val">${drill('hankyo',-1,total.hankyoCount)}</div>
       <div class="summary-sub">${months.length}ヶ月合計</div>
     </div>
     <div class="summary-card">
       <div class="summary-label">Contact数</div>
-      <div class="summary-val">${total.contactCount}</div>
+      <div class="summary-val">${drill('contact',-1,total.contactCount)}</div>
       <div class="summary-sub">Con率 ${total.conRate!=null?total.conRate+'%':'—'}</div>
     </div>
     <div class="summary-card">
       <div class="summary-label">案内数</div>
-      <div class="summary-val ${total.annaiCount>=annaiTarget?'good':total.annaiCount>=annaiTarget*0.7?'warn':'bad'}">${total.annaiCount}</div>
+      <div class="summary-val ${total.annaiCount>=annaiTarget?'good':total.annaiCount>=annaiTarget*0.7?'warn':'bad'}">${drill('annai',-1,total.annaiCount)}</div>
       <div class="summary-target">目標 ${annaiTarget}件（${TARGET_ANNAI}×${headcount}名×${months.length}ヶ月）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${annaiPct}%;background:${annaiPct>=100?'#176b47':annaiPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
       <div class="summary-label">来社数</div>
-      <div class="summary-val ${total.raishaCount>=raishaTarget?'good':total.raishaCount>=raishaTarget*0.7?'warn':'bad'}">${total.raishaCount}</div>
+      <div class="summary-val ${total.raishaCount>=raishaTarget?'good':total.raishaCount>=raishaTarget*0.7?'warn':'bad'}">${drill('raisha',-1,total.raishaCount)}</div>
       <div class="summary-target">目標 ${raishaTarget}件（${TARGET_RAISHA}×${headcount}名×${months.length}ヶ月）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${raishaPct}%;background:${raishaPct>=100?'#176b47':raishaPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
       <div class="summary-label">契約数</div>
-      <div class="summary-val">${total.keiyakuCount}</div>
+      <div class="summary-val">${drill('keiyaku',-1,total.keiyakuCount)}</div>
       <div class="summary-sub">成約率 ${total.seizyakuRate!=null?total.seizyakuRate+'%':'—'}</div>
     </div>`;
 }
 
 function renderKPITablePeriod(customers,cases,logs,staffList,months){
   const rateClass=(r)=>r==null?'rate-cell':r>=50?'rate-cell good':r>=30?'rate-cell warn':'rate-cell bad';
-  const rows=staffList.map(staff=>{
+  const rows=staffList.map((staff,si)=>{
     const k=calcKPIPeriod(customers,cases,logs,staff,months);
     return `<tr>
       <td class="left">${staff}</td>
-      <td>${k.hankyoCount}</td>
-      <td>${k.contactCount}</td>
+      <td>${drill('hankyo',si,k.hankyoCount)}</td>
+      <td>${drill('contact',si,k.contactCount)}</td>
       <td class="${rateClass(k.conRate)}">${k.conRate!=null?k.conRate+'%':'—'}</td>
-      <td>${k.annaiCount}</td>
-      <td>${k.raishaCount}</td>
+      <td>${drill('annai',si,k.annaiCount)}</td>
+      <td>${drill('raisha',si,k.raishaCount)}</td>
       <td class="${rateClass(k.raishaRate)}">${k.raishaRate!=null?k.raishaRate+'%':'—'}</td>
-      <td>${k.reannaiCount}</td>
-      <td>${k.keiyakuCount}</td>
+      <td>${drill('reannai',si,k.reannaiCount)}</td>
+      <td>${drill('keiyaku',si,k.keiyakuCount)}</td>
       <td class="${rateClass(k.seizyakuRate)}">${k.seizyakuRate!=null?k.seizyakuRate+'%':'—'}</td>
     </tr>`;
   });
   const total=calcKPIPeriod(customers,cases,logs,null,months);
   rows.push(`<tr class="total-row">
     <td class="left">合計</td>
-    <td>${total.hankyoCount}</td>
-    <td>${total.contactCount}</td>
+    <td>${drill('hankyo',-1,total.hankyoCount)}</td>
+    <td>${drill('contact',-1,total.contactCount)}</td>
     <td class="${rateClass(total.conRate)}">${total.conRate!=null?total.conRate+'%':'—'}</td>
-    <td>${total.annaiCount}</td>
-    <td>${total.raishaCount}</td>
+    <td>${drill('annai',-1,total.annaiCount)}</td>
+    <td>${drill('raisha',-1,total.raishaCount)}</td>
     <td class="${rateClass(total.raishaRate)}">${total.raishaRate!=null?total.raishaRate+'%':'—'}</td>
-    <td>${total.reannaiCount}</td>
-    <td>${total.keiyakuCount}</td>
+    <td>${drill('reannai',-1,total.reannaiCount)}</td>
+    <td>${drill('keiyaku',-1,total.keiyakuCount)}</td>
     <td class="${rateClass(total.seizyakuRate)}">${total.seizyakuRate!=null?total.seizyakuRate+'%':'—'}</td>
   </tr>`);
   document.getElementById('kpi-tbody').innerHTML=rows.join('');
@@ -1039,47 +1137,47 @@ function renderSummary(customers,cases,logs,staffList,year,month){
   document.getElementById('summary-row').innerHTML=`
     <div class="summary-card">
       <div class="summary-label">反響数（仲介事業部）</div>
-      <div class="summary-val">${total.hankyoCount}</div>
+      <div class="summary-val">${drill('hankyo',-1,total.hankyoCount)}</div>
       <div class="summary-sub">新規登録顧客</div>
     </div>
     <div class="summary-card">
       <div class="summary-label">Contact数</div>
-      <div class="summary-val">${total.contactCount}</div>
+      <div class="summary-val">${drill('contact',-1,total.contactCount)}</div>
       <div class="summary-sub">Con率 ${total.conRate!=null?total.conRate+'%':'—'}</div>
     </div>
     <div class="summary-card">
       <div class="summary-label">案内数</div>
-      <div class="summary-val ${total.annaiCount>=annaiTarget?'good':total.annaiCount>=annaiTarget*0.7?'warn':'bad'}">${total.annaiCount}</div>
+      <div class="summary-val ${total.annaiCount>=annaiTarget?'good':total.annaiCount>=annaiTarget*0.7?'warn':'bad'}">${drill('annai',-1,total.annaiCount)}</div>
       <div class="summary-target">目標 ${annaiTarget}件（${TARGET_ANNAI}×${headcount}名）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${annaiPct}%;background:${annaiPct>=100?'#176b47':annaiPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
       <div class="summary-label">来社数</div>
-      <div class="summary-val ${total.raishaCount>=raishaTarget?'good':total.raishaCount>=raishaTarget*0.7?'warn':'bad'}">${total.raishaCount}</div>
+      <div class="summary-val ${total.raishaCount>=raishaTarget?'good':total.raishaCount>=raishaTarget*0.7?'warn':'bad'}">${drill('raisha',-1,total.raishaCount)}</div>
       <div class="summary-target">目標 ${raishaTarget}件（${TARGET_RAISHA}×${headcount}名）</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${raishaPct}%;background:${raishaPct>=100?'#176b47':raishaPct>=70?'#8a5c0a':'#9a2323'}"></div></div>
     </div>
     <div class="summary-card">
       <div class="summary-label">契約数</div>
-      <div class="summary-val">${total.keiyakuCount}</div>
+      <div class="summary-val">${drill('keiyaku',-1,total.keiyakuCount)}</div>
       <div class="summary-sub">成約率 ${total.seizyakuRate!=null?total.seizyakuRate+'%':'—'}</div>
     </div>`;
 }
 
 function renderKPITable(customers,cases,logs,staffList,year,month){
-  const rows=staffList.map(staff=>{
+  const rows=staffList.map((staff,si)=>{
     const k=calcKPI(customers,cases,logs,staff,year,month);
     const rateClass=(r)=>r==null?'rate-cell':r>=50?'rate-cell good':r>=30?'rate-cell warn':'rate-cell bad';
     return `<tr>
       <td class="left">${staff}</td>
-      <td>${k.hankyoCount}</td>
-      <td>${k.contactCount}</td>
+      <td>${drill('hankyo',si,k.hankyoCount)}</td>
+      <td>${drill('contact',si,k.contactCount)}</td>
       <td class="${rateClass(k.conRate)}">${k.conRate!=null?k.conRate+'%':'—'}</td>
-      <td>${k.annaiCount}</td>
-      <td>${k.raishaCount}</td>
+      <td>${drill('annai',si,k.annaiCount)}</td>
+      <td>${drill('raisha',si,k.raishaCount)}</td>
       <td class="${rateClass(k.raishaRate)}">${k.raishaRate!=null?k.raishaRate+'%':'—'}</td>
-      <td>${k.reannaiCount}</td>
-      <td>${k.keiyakuCount}</td>
+      <td>${drill('reannai',si,k.reannaiCount)}</td>
+      <td>${drill('keiyaku',si,k.keiyakuCount)}</td>
       <td class="${rateClass(k.seizyakuRate)}">${k.seizyakuRate!=null?k.seizyakuRate+'%':'—'}</td>
     </tr>`;
   });
@@ -1089,14 +1187,14 @@ function renderKPITable(customers,cases,logs,staffList,year,month){
   const rateClass=(r)=>r==null?'rate-cell':r>=50?'rate-cell good':r>=30?'rate-cell warn':'rate-cell bad';
   rows.push(`<tr class="total-row">
     <td class="left">合計</td>
-    <td>${total.hankyoCount}</td>
-    <td>${total.contactCount}</td>
+    <td>${drill('hankyo',-1,total.hankyoCount)}</td>
+    <td>${drill('contact',-1,total.contactCount)}</td>
     <td class="${rateClass(total.conRate)}">${total.conRate!=null?total.conRate+'%':'—'}</td>
-    <td>${total.annaiCount}</td>
-    <td>${total.raishaCount}</td>
+    <td>${drill('annai',-1,total.annaiCount)}</td>
+    <td>${drill('raisha',-1,total.raishaCount)}</td>
     <td class="${rateClass(total.raishaRate)}">${total.raishaRate!=null?total.raishaRate+'%':'—'}</td>
-    <td>${total.reannaiCount}</td>
-    <td>${total.keiyakuCount}</td>
+    <td>${drill('reannai',-1,total.reannaiCount)}</td>
+    <td>${drill('keiyaku',-1,total.keiyakuCount)}</td>
     <td class="${rateClass(total.seizyakuRate)}">${total.seizyakuRate!=null?total.seizyakuRate+'%':'—'}</td>
   </tr>`);
 
