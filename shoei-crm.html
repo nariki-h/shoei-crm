@@ -947,23 +947,36 @@ async function deleteLog(logId, custId){
   hideLoading();
 }
 
+// 顧客削除は「案件・活動履歴 → 顧客」の順に消す。
+// 旧実装は顧客だけを消していたため、案件と活動履歴が孤児として残り、
+// ダッシュボードのKPIに「顧客不明」の案内・来社としてカウントされ続けていた。
 async function deleteCustomer(id){
-  if(!confirm('この顧客を削除しますか？\n※案件・活動履歴も削除されます')) return;
+  const c0=customers.find(x=>x.id===id);
+  const nCase=(c0?.cases||[]).filter(x=>x.id).length;
+  const nLog=(c0?.logs||[]).filter(x=>x.id).length;
+  if(!confirm(`この顧客を削除しますか？\n※案件 ${nCase}件・活動履歴 ${nLog}件 も一緒に削除されます（元に戻せません）`)) return;
   showLoading('削除中...');
   try{
     const token=await getToken();
     const digest=await getDigest(token);
-    // 顧客削除
-    await fetch(`${SITE_URL}/_api/web/lists/getbytitle('顧客リスト')/items(${id})`,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+token,'X-RequestDigest':digest,'IF-MATCH':'*','X-HTTP-Method':'DELETE'}
-    });
+    const delItem=async(list,itemId)=>{
+      const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${itemId})`,{
+        method:'POST',
+        headers:{'Authorization':'Bearer '+token,'X-RequestDigest':digest,'IF-MATCH':'*','X-HTTP-Method':'DELETE'}
+      });
+      // 既に消えている(404)は無視。それ以外の失敗は中断させる。
+      if(!r.ok&&r.status!==404) throw new Error(`${list} の削除に失敗 (HTTP ${r.status})`);
+    };
+    // ① 活動履歴 → ② 案件 → ③ 顧客 の順（子から消す）
+    for(const l of (c0?.logs||[])){ if(l.id) await delItem('活動履歴リスト',l.id); }
+    for(const cs of (c0?.cases||[])){ if(cs.id) await delItem('案件リスト',cs.id); }
+    await delItem('顧客リスト',id);
     customers=customers.filter(x=>x.id!==id);
     selectedId=null;
     document.getElementById('detail').innerHTML='<div class="detail-empty"><div style="font-size:40px;opacity:.3;">🏠</div><div>顧客を選択してください</div></div>';
     document.querySelector('.body')?.classList.remove('show-detail');
     renderList();
-    showToast('削除しました');
+    showToast(`削除しました（案件${nCase}件・活動履歴${nLog}件も削除）`);
   }catch(e){showToast('削除エラー: '+e.message,true);}
   hideLoading();
 }
