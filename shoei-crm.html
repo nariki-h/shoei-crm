@@ -308,6 +308,7 @@ body.readonly #import-btn{display:none!important;}
     <div class="header-user">
       <div class="header-avatar" id="user-initials">--</div>
       <span id="user-name" class="header-name">--</span>
+      <span id="user-mail" class="header-name" style="opacity:.55;font-size:11px;font-weight:400;">--</span>
       <a href="https://nariki-h.github.io/shoei-crm/dashboard.html" class="header-btn header-link" style="text-decoration:none;">📊<span class="btn-text"> ダッシュボード</span></a>
       <button class="header-btn" id="logout-btn"><span class="btn-text">ログアウト</span><span class="btn-icon" aria-hidden="true" style="display:none;">⏻</span></button>
     </div>
@@ -407,6 +408,9 @@ const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All','User.Read'];
 
 let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0;
 let currentRole="member", currentTeam="", currentStaffName="";
+/* 氏名の表記ゆれ吸収。Azure ADの表示名「村上 光南」と
+   担当者マスター/顧客リストの「村上光南」を同一人物として扱う。 */
+const normName=s=>String(s==null?'':s).replace(/[\s\u3000]/g,'');
 /* 担当者マスターの「役職」列で権限が決まる。
    admin   … 全件閲覧・編集・CSV取込
    manager … 自チームの顧客を閲覧・編集
@@ -445,7 +449,7 @@ function renderStaffFilterOptions(){
   if(!sel)return;
   let names;
   if(ROLE_VIEW_ALL.has(currentRole)) names=(window.STAFF_LIST||[]);
-  else if(currentRole==='manager') names=Object.keys(window.STAFF_MAP||{}).filter(n=>window.STAFF_MAP[n].team===currentTeam);
+  else if(currentRole==='manager') names=Object.keys(window.STAFF_MAP||{}).filter(n=>window.STAFF_MAP[n].team===currentTeam).map(n=>window.STAFF_MAP[n].name||n);
   else names=[currentStaffName];
   const cur=sel.value;
   sel.innerHTML='<option value="">全担当者</option>'+names.map(n=>`<option${cur===n?' selected':''}>${n}</option>`).join('');
@@ -493,6 +497,8 @@ async function onSignedIn(){
   currentStaffName=name;
   document.getElementById('user-name').textContent=name;
   document.getElementById('user-initials').textContent=name.slice(0,2);
+  const mailEl=document.getElementById('user-mail');
+  if(mailEl) mailEl.textContent=currentUser.username||'';
   await loadCustomers();
 }
 
@@ -503,7 +509,11 @@ async function spGetItems(list,filter=''){
   let results=[];
   while(url){
     const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
-    if(!r.ok){const t=await r.text();throw new Error(`${list} 取得エラー HTTP ${r.status}: ${t.slice(0,150)}`);}
+    if(!r.ok){
+      const t=await r.text();
+      if(r.status===403||r.status===401) throw new Error(`「${list}」へのアクセス権限がありません。SharePointサイト Shoei-RealEstate への追加を管理者に依頼してください。（ログイン: ${(currentUser&&currentUser.username)||'不明'}）`);
+      throw new Error(`${list} 取得エラー HTTP ${r.status}: ${t.slice(0,150)}`);
+    }
     const d=await r.json();
     results=results.concat(d.d.results);
     url=d.d.__next||null;
@@ -574,11 +584,12 @@ async function loadStaff(){
     const items=await spGetItems('担当者マスター');
     window.STAFF_MAP={}; // 名前→{role,team}のマップ
     items.forEach(i=>{
-      window.STAFF_MAP[i.Title]={role:String(i['OData__x5f79__x8077_']||'member').trim(),team:i['OData__x30c1__x30fc__x30e0_']||''};
+      const k=normName(i.Title); if(!k) return;
+      window.STAFF_MAP[k]={role:String(i['OData__x5f79__x8077_']||'member').trim(),team:i['OData__x30c1__x30fc__x30e0_']||'',name:i.Title};
     });
     // 顧客・活動の「担当者」に出すのは営業だけ（事務・閲覧者は割り当て対象外）
     window.SALES_LIST=items.map(i=>i.Title).filter(Boolean)
-      .filter(n=>!ROLE_NON_SALES.has((window.STAFF_MAP[n]||{}).role));
+      .filter(n=>!ROLE_NON_SALES.has((window.STAFF_MAP[normName(n)]||{}).role));
     return items.map(i=>i.Title).filter(Boolean);
   }catch(e){
     window.STAFF_MAP={};
@@ -593,9 +604,12 @@ async function loadCustomers(){
     // 担当者マスター読み込み
     window.STAFF_LIST = await loadStaff();
     // ログインユーザーのロール・チームを設定
-    const myInfo=window.STAFF_MAP?.[currentStaffName]||{role:'member',team:''};
-    currentRole=myInfo.role;
-    currentTeam=myInfo.team;
+    const myInfo=window.STAFF_MAP?.[normName(currentStaffName)];
+    if(!myInfo) showToast('担当者マスターに「'+currentStaffName+'」が見つかりません。管理者に登録を依頼してください。',true);
+    currentRole=(myInfo&&myInfo.role)||'member';
+    currentTeam=(myInfo&&myInfo.team)||'';
+    // 以降の照合は担当者マスターの表記に合わせる
+    if(myInfo&&myInfo.name){currentStaffName=myInfo.name;document.getElementById('user-name').textContent=myInfo.name;}
     document.getElementById('import-btn').style.display=(currentRole==='admin')?'block':'none';
     if(!canEdit()) document.body.classList.add('readonly');
     renderStaffFilterOptions();
@@ -663,14 +677,14 @@ function renderList(){
   const fs=document.getElementById('filter-staff')?.value||'';
   const sort=document.getElementById('sort-select')?.value||'';
   // 権限レベルによる顧客フィルタリング
-  const visibleStaff=ROLE_VIEW_ALL.has(currentRole)?null:
+  const visibleStaff=ROLE_VIEW_ALL.has(currentRole)?null:new Set(
     currentRole==='manager'?Object.keys(window.STAFF_MAP||{}).filter(n=>(window.STAFF_MAP[n].team===currentTeam)):
-    [currentStaffName];
+    [normName(currentStaffName)]);
   // フェーズ複数選択（全選択または未選択のときは絞り込みなし）
   const usePhase=selectedPhases.size>0 && selectedPhases.size<PHASES.length;
   const f=customers.filter(c=>{
-    if(visibleStaff&&!visibleStaff.includes(c.staff)) return false;
-    if(fs&&c.staff!==fs) return false;
+    if(visibleStaff&&!visibleStaff.has(normName(c.staff))) return false;
+    if(fs&&normName(c.staff)!==normName(fs)) return false;
     if(q&&!c.name.includes(q)&&!c.kana.includes(q)&&!(c.address||'').includes(q)) return false;
     if(usePhase&&!c.cases.some(x=>selectedPhases.has(x.phase))) return false;
     if(fr&&c.rank!==fr) return false;
@@ -742,7 +756,7 @@ function renderDetail(){
           <div class="field-item"><span class="fl">カナ</span><div class="fv"><input value="${c.kana}" onchange="cf(${c.id},'kana',this.value)"/></div></div>
           <div class="field-item"><span class="fl">種別</span><div class="fv"><select onchange="cf(${c.id},'type',this.value)"><option${c.type==='個人'?' selected':''}>個人</option><option${c.type==='法人'?' selected':''}>法人</option></select></div></div>
           <div class="field-item"><span class="fl">ランク</span><div class="fv"><select onchange="cf(${c.id},'rank',this.value)">${RANKS.map(r=>`<option${c.rank===r?' selected':''}>${r}</option>`).join('')}</select></div></div>
-          <div class="field-item"><span class="fl">担当者</span><div class="fv"><select onchange="cf(${c.id},'staff',this.value)"><option value="">未設定</option>${(window.SALES_LIST||[]).map(s=>`<option${c.staff===s?' selected':''}>${s}</option>`).join('')}</select></div></div>
+          <div class="field-item"><span class="fl">担当者</span><div class="fv"><select onchange="cf(${c.id},'staff',this.value)"><option value="">未設定</option>${(window.SALES_LIST||[]).map(s=>`<option${normName(c.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}</select></div></div>
           <div class="field-item"><span class="fl">電話番号</span><div class="fv"><input value="${c.tel}" onchange="cf(${c.id},'tel',this.value)" oninput="this.value=this.value.replace(/[^0-9\-]/g,'')" placeholder="例：090-1234-5678"/></div></div>
           <div class="field-item"><span class="fl">メール</span><div class="fv"><input value="${c.email}" onchange="cf(${c.id},'email',this.value)"/></div></div>
           <div class="field-item full"><span class="fl">住所</span><div class="fv"><input value="${c.address}" onchange="cf(${c.id},'address',this.value)"/></div></div>
@@ -778,7 +792,7 @@ function renderDetail(){
             <div class="log-form-row">
               <input type="date" id="log-date" value="${new Date().toISOString().slice(0,10)}"/>
               <select id="log-staff-select" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
-                ${(window.SALES_LIST||window.STAFF_LIST||[]).map(s=>`<option value="${s}"${s===(currentUser?.name||'')?' selected':''}>${s}</option>`).join('')}
+                ${(window.SALES_LIST||window.STAFF_LIST||[]).map(s=>`<option value="${s}"${normName(s)===normName(currentStaffName)?' selected':''}>${s}</option>`).join('')}
               </select>
               <span id="log-type-label" style="font-size:12px;font-weight:700;color:var(--accent);"></span>
               <button class="log-save-btn" onclick="saveLog()">記録する</button>
@@ -1186,7 +1200,7 @@ async function saveLog(){
   if(!c||!selectedLogType){showToast('種別を選択してください',true);return;}
   const date=document.getElementById('log-date').value;
   const memo=document.getElementById('log-memo').value;
-  const staffSel=document.getElementById('log-staff-select')?.value||currentUser?.name||'';
+  const staffSel=document.getElementById('log-staff-select')?.value||currentStaffName||'';
   showLoading('記録中...');
   try{
     const r=await spAdd('活動履歴リスト',{
@@ -1253,7 +1267,8 @@ function openImportModal(){
   const sel=document.getElementById('imp-staff');
   const names=(window.STAFF_LIST||[]);
   sel.innerHTML='<option value="">選択してください</option>'+names.map(n=>`<option value="${impEsc(n)}">${impEsc(n)}</option>`).join('');
-  if(names.includes(currentStaffName))sel.value=currentStaffName;
+  const hit=names.find(n=>normName(n)===normName(currentStaffName));
+  if(hit)sel.value=hit;
   document.getElementById('imp-dedup').checked=true;
   document.getElementById('imp-run').disabled=true;
   document.getElementById('imp-test').disabled=true;
