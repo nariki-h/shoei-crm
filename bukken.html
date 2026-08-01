@@ -453,6 +453,7 @@ const RAILWAYS={"山手線": ["品川", "大崎", "五反田", "目黒", "恵比
 
 const F={title:'Title',pub:'PubStatus',sale:'SaleStatus',acq:'AcquiredDate',chk:'LastCheckDate',
   type:'PropType',price:'PriceMan',fprice:'FirstPriceMan',fnote:'FirstPriceNote',band:'PriceBand',
+  pricemax:'PriceManMax',landmax:'LandAreaMax',bldgmax:'BuildingAreaMax',units:'Units',
   pref:'Pref',ward:'Ward',addr:'Address',daddr:'DispAddress',area:'Area',
   l1:'Line1',s1:'Station1',w1:'Walk1',l2:'Line2',s2:'Station2',w2:'Walk2',
   l3:'Line3',s3:'Station3',w3:'Walk3',
@@ -586,6 +587,14 @@ async function loadItems(){
   catch(e){toast('読み込みエラー: '+e.message);}
 }
 function nv(v){return v===null||v===undefined||v===''?null:Number(v);}
+/* 多区画対応：下限〜上限の表示。上限が空／下限と同じなら単一値として出す。 */
+function fmtRange(lo,hi){
+  const a=nv(lo),b=nv(hi);
+  if(a===null&&b===null)return '';
+  if(a===null)return fmtN(b);
+  if(b===null||b===a)return fmtN(a);
+  return fmtN(a)+'〜'+fmtN(b);
+}
 function filtered(){
   const q=(document.getElementById('q').value||'').trim();
   const w=document.getElementById('f-ward').value;
@@ -597,12 +606,13 @@ function filtered(){
     if(view==='notify'&&!i[F.nf])return false;
     if(w&&i[F.ward]!==w)return false;
     if(t&&i[F.type]!==t)return false;
-    const p=nv(i[F.price]);
-    if(pmin!==null&&(p===null||p<pmin))return false;
-    if(pmax!==null&&(p===null||p>pmax))return false;
-    const a=nv(i[F.land]);
-    if(amin!==null&&(a===null||a<amin))return false;
-    if(amax!==null&&(a===null||a>amax))return false;
+    // 多区画は幅を持つので「範囲が重なるか」で判定する
+    const p0=nv(i[F.price]); const p1=nv(i[F.pricemax])??p0;
+    if(pmin!==null&&(p1===null||p1<pmin))return false;
+    if(pmax!==null&&(p0===null||p0>pmax))return false;
+    const a0=nv(i[F.land]); const a1=nv(i[F.landmax])??a0;
+    if(amin!==null&&(a1===null||a1<amin))return false;
+    if(amax!==null&&(a0===null||a0>amax))return false;
     if(q&&![i[F.title],i[F.addr],i[F.daddr],i[F.ward],i[F.s1],i[F.s2],i[F.s3],i[F.sc],i[F.sn]].some(v=>String(v||'').includes(q)))return false;
     return true;
   });
@@ -650,9 +660,9 @@ function renderList(){
   const body=rows.map(i=>`<tr onclick="select(${i.Id})">
     <td class="nm">${esc(i[F.title]||'(名称未設定)')}</td>
     <td class="sub">${esc(i[F.type]||'')}</td>
-    <td class="num">${fmtN(i[F.price])}</td>
-    <td class="num sub">${fmtN(i[F.land])}</td>
-    <td class="num sub">${fmtN(i[F.bldg])}</td>
+    <td class="num">${fmtRange(i[F.price],i[F.pricemax])}${nv(i[F.units])?`<span class="sub" style="font-size:10px;"> (${i[F.units]}区画)</span>`:''}</td>
+    <td class="num sub">${fmtRange(i[F.land],i[F.landmax])}</td>
+    <td class="num sub">${fmtRange(i[F.bldg],i[F.bldgmax])}</td>
     <td class="sub">${esc(i[F.ward]||'')}</td>
     <td class="sub">${esc(i[F.s1]||'')}${i[F.w1]?` 徒${i[F.w1]}`:''}</td>
     <td>${pdfCell(i)}</td>
@@ -702,7 +712,13 @@ function renderForm(){
       <div class="fi"><label>公開区分</label><select id="f_pub">${opt(PUB,i[F.pub])}</select></div>
       <div class="fi"><label>販売状況</label><select id="f_sale" onchange="syncStatus()">${opt(SALE,i[F.sale])}</select></div>
       <div class="fi"><label>種別 <span style="color:var(--accent);">＊CRMと同一</span></label><select id="f_type">${opt(KINDS,i[F.type])}</select></div>
-      <div class="fi"><label>現在価格（万円）</label><input id="f_price" type="number" value="${i[F.price]??''}" placeholder="13980"></div>
+      <div class="fi"><label>現在価格（万円）<span style="color:var(--accent);">＊左＝最低価格。通知の照合はこれを使用</span></label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input id="f_price" type="number" value="${i[F.price]??''}" placeholder="13980" style="flex:1;">
+          <span style="color:var(--text-muted);">〜</span>
+          <input id="f_pricemax" type="number" value="${i[F.pricemax]??''}" placeholder="多区画のみ" style="flex:1;">
+        </div></div>
+      <div class="fi"><label>区画数・棟数</label><input id="f_units" type="number" value="${i[F.units]??''}" placeholder="単一なら空欄"></div>
       <div class="fi"><label>都道府県</label><input id="f_pref" value="${esc(i[F.pref]||'東京都')}"></div>
       <div class="fi"><label>市区 <span style="color:var(--accent);">＊照合キー</span></label><select id="f_ward">${opt(AREAS,i[F.ward])}</select></div>
       <div class="fi full"><label>住所（番地まで／社内用）</label><input id="f_addr" value="${esc(i[F.addr]||'')}" placeholder="戸越6-3-7"></div>
@@ -725,9 +741,19 @@ function renderForm(){
       <div class="fi"><label>沿線3</label><select id="f_l3" onchange="onLine(3)">${opt(lines,i[F.l3])}</select></div>
       <div class="fi"><label>駅3</label><select id="f_s3">${opt(stations(i[F.l3]),i[F.s3])}</select></div>
       <div class="fi"><label>徒歩3（分）</label><input id="f_w3" type="number" value="${i[F.w3]??''}"></div>
-      <div class="fi"><label>土地面積（㎡）</label><input id="f_land" type="number" step="0.01" value="${i[F.land]??''}"></div>
-      <div class="fi"><label>建物面積（㎡）</label><input id="f_bldg" type="number" step="0.01" value="${i[F.bldg]??''}"></div>
-      <div class="fi"><label>間取り</label><input id="f_layout" value="${esc(i[F.layout]||'')}" placeholder="3LDK"></div>
+      <div class="fi"><label>土地面積（㎡）</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input id="f_land" type="number" step="0.01" value="${i[F.land]??''}" style="flex:1;">
+          <span style="color:var(--text-muted);">〜</span>
+          <input id="f_landmax" type="number" step="0.01" value="${i[F.landmax]??''}" placeholder="多区画のみ" style="flex:1;">
+        </div></div>
+      <div class="fi"><label>建物面積（㎡）</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input id="f_bldg" type="number" step="0.01" value="${i[F.bldg]??''}" style="flex:1;">
+          <span style="color:var(--text-muted);">〜</span>
+          <input id="f_bldgmax" type="number" step="0.01" value="${i[F.bldgmax]??''}" placeholder="多区画のみ" style="flex:1;">
+        </div></div>
+      <div class="fi"><label>間取り</label><input id="f_layout" value="${esc(i[F.layout]||'')}" placeholder="3LDK／4LDK など幅も可"></div>
       <div class="fi"><label>エリア（集計用）</label><select id="f_area">${opt(AREAGRP,i[F.area])}</select></div>
       <div class="fi"><label>価格帯（表示用）</label><select id="f_band">${opt(BAND,i[F.band])}</select></div>
     </div>
@@ -806,12 +832,14 @@ function collect(){
   const b={};
   b[F.title]=val('f_title');b[F.pub]=val('f_pub');b[F.sale]=val('f_sale');
   b[F.type]=val('f_type');b[F.price]=num('f_price');b[F.pref]=val('f_pref');
+  b[F.pricemax]=num('f_pricemax');b[F.units]=num('f_units');
   b[F.ward]=val('f_ward');b[F.addr]=val('f_addr');b[F.daddr]=val('f_daddr');
   b[F.intro]=val('f_intro');b[F.acq]=dat('f_acq');b[F.chk]=dat('f_chk');
   b[F.l1]=val('f_l1');b[F.s1]=val('f_s1');b[F.w1]=num('f_w1');
   b[F.l2]=val('f_l2');b[F.s2]=val('f_s2');b[F.w2]=num('f_w2');
   b[F.l3]=val('f_l3');b[F.s3]=val('f_s3');b[F.w3]=num('f_w3');
   b[F.land]=num('f_land');b[F.bldg]=num('f_bldg');b[F.layout]=val('f_layout');
+  b[F.landmax]=num('f_landmax');b[F.bldgmax]=num('f_bldgmax');
   b[F.area]=val('f_area');b[F.band]=val('f_band');
   b[F.sc]=val('f_sc');b[F.sn]=val('f_sn');b[F.st]=val('f_st');b[F.inote]=val('f_inote');
   b[F.fprice]=num('f_fprice');b[F.fnote]=val('f_fnote');b[F.memo]=val('f_memo');
@@ -819,6 +847,12 @@ function collect(){
 }
 async function save(){
   if(!val('f_title')){toast('物件名を入力してください');return;}
+  // 上限＜下限の取り違えを保存前に止める（通知は下限を基準に判定するため）
+  for(const [lo,hi,nm] of [['f_price','f_pricemax','価格'],['f_land','f_landmax','土地面積'],['f_bldg','f_bldgmax','建物面積']]){
+    const a=num(lo),b2=num(hi);
+    if(a!==null&&b2!==null&&b2<a){toast(nm+'の上限が下限を下回っています');return;}
+    if(a===null&&b2!==null){toast(nm+'は左（下限）から入力してください');return;}
+  }
   try{
     const b=collect();
     if(cur.Id){await spUpdate(cur.Id,b);toast('保存しました');}
