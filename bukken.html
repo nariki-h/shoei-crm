@@ -85,7 +85,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{
   --primary:#1a3a5c;--accent:#2d7dd2;--accent-light:#e8f2fc;
-  --success:#2d9e6b;--border:#e2e8f0;--text:#1a202c;
+  --success:#2d9e6b;--danger:#c0392b;--border:#e2e8f0;--text:#1a202c;
   --text-sub:#64748b;--text-muted:#94a3b8;--bg:#f7f9fc;--surface:#ffffff;
 }
 body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;height:100vh;height:100dvh;overflow:hidden;}
@@ -349,6 +349,8 @@ td.sub{color:var(--text-sub);}
 .bk-btn{padding:7px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-sub);font-size:12px;cursor:pointer;white-space:nowrap;}
 .bk-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
 .bk-btn.notify{background:var(--success);color:#fff;border-color:var(--success);}
+.bk-btn.danger{background:var(--surface);color:var(--danger);border-color:var(--danger);}
+.bk-btn.danger:hover{background:var(--danger);color:#fff;}
 .bk-btn:disabled{opacity:.45;cursor:not-allowed;}
 .dz{grid-column:1/-1;border:2px dashed var(--border);border-radius:10px;padding:22px;text-align:center;color:var(--text-muted);font-size:12px;cursor:pointer;background:var(--bg);}
 .dz.over{border-color:var(--accent);background:var(--accent-light);color:var(--accent);}
@@ -420,6 +422,7 @@ td.sub{color:var(--text-sub);}
       <span class="st-pill" id="head-status"></span>
       <button class="bk-btn primary" onclick="save()">保存</button>
       <button class="bk-btn notify" id="notify-btn" onclick="notifyNow()">担当へ通知</button>
+      <button class="bk-btn danger" id="del-btn" onclick="removeItem()">削除</button>
     </div>
     <div class="bk-scroll" id="form"></div>
   </div>
@@ -536,6 +539,36 @@ async function spAdd(body){
   if(!r.ok){const t=await r.text();throw new Error('登録エラー HTTP '+r.status+': '+unesc(t).slice(0,200));}
   return (await r.json()).d;
 }
+async function spRecycle(id){
+  const token=await getToken();
+  const digest=await getDigest(token);
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${LIST}')/items(${id})/recycle()`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-RequestDigest':digest}
+  });
+  if(!r.ok){const t=await r.text();throw new Error('削除エラー HTTP '+r.status+': '+unesc(t).slice(0,200));}
+}
+async function spRecycleFolder(path){
+  const token=await getToken();
+  const digest=await getDigest(token);
+  const r=await fetch(`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${encodeURIComponent(path)}')/recycle`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-RequestDigest':digest}
+  });
+  if(!r.ok){
+    const t=unesc(await r.text());
+    if(r.status===404||/not exist|存在しません|見つかりません|File Not Found/i.test(t))return false; // フォルダ無しは正常扱い
+    throw new Error('フォルダ削除エラー HTTP '+r.status+': '+t.slice(0,180));
+  }
+  return true;
+}
+async function spMoveFile(oldPath,newPath){
+  const token=await getToken();
+  const digest=await getDigest(token);
+  const url=`${SITE_URL}/_api/web/GetFileByServerRelativePath(decodedurl='${encodeURIComponent(oldPath)}')/moveto(newurl='${encodeURIComponent(newPath)}',flags=1)`;
+  const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-RequestDigest':digest}});
+  if(!r.ok){const t=unesc(await r.text());throw new Error('ファイル名の変更に失敗: '+t.slice(0,180));}
+}
 async function spUpdate(id,body){
   const token=await getToken();
   body.__metadata={type:await getListType(token)};
@@ -545,6 +578,11 @@ async function spUpdate(id,body){
     body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text();throw new Error('更新エラー HTTP '+r.status+': '+unesc(t).slice(0,200));}
 }
+function folderPathOf(i){
+  const u=urlOf(i[F.folder]);
+  if(u){try{return decodeURIComponent(new URL(u).pathname);}catch(e){}}
+  return `${SITE_PATH}/${DOCLIB}/${ROOT_FOLDER}/${i.Id}_${safeName(i[F.title])}`;
+}
 function safeName(s){return String(s||'').replace(/["*:<>?/\\|#%]/g,'').replace(/\s+/g,' ').trim().slice(0,80)||'物件';}
 async function ensureFolder(path,token,digest){
   const r=await fetch(`${SITE_URL}/_api/web/folders`,{
@@ -553,13 +591,13 @@ async function ensureFolder(path,token,digest){
     body:JSON.stringify({__metadata:{type:'SP.Folder'},ServerRelativeUrl:path})});
   if(!r.ok){const t=unesc(await r.text());if(!/exist|存在/.test(t))throw new Error('フォルダ作成エラー: '+t.slice(0,180));}
 }
-async function uploadFile(file,folderPath){
+async function uploadFile(file,folderPath,forcedName){
   const token=await getToken();
   const digest=await getDigest(token);
   await ensureFolder(`${SITE_PATH}/${DOCLIB}/${ROOT_FOLDER}`,token,digest);
   await ensureFolder(folderPath,token,digest);
   const buf=await file.arrayBuffer();
-  const fname=safeName(file.name);
+  const fname=safeName(forcedName||file.name);
   const url=`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${encodeURIComponent(folderPath)}')/Files/add(url='${encodeURIComponent(fname)}',overwrite=true)`;
   const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-RequestDigest':digest},body:buf});
   if(!r.ok){const t=unesc(await r.text());throw new Error('アップロード失敗: '+t.slice(0,180));}
@@ -700,6 +738,7 @@ function renderForm(){
   const st=document.getElementById('head-status');
   st.textContent=i[F.sale]||'販売中';st.className='st-pill st-'+(i[F.sale]||'販売中');
   document.getElementById('notify-btn').disabled=!i.Id;
+  document.getElementById('del-btn').disabled=!i.Id;
   const lines=Object.keys(RAILWAYS);
   const stations=l=>RAILWAYS[l]||[];
 
@@ -792,11 +831,11 @@ function renderForm(){
         </select></div>
       <div class="dz" id="dz" onclick="document.getElementById('picker').click()">
         ここにファイルをドラッグ＆ドロップ（クリックで選択）<br>
-        <span style="font-size:11px;">/${DOCLIB}/${ROOT_FOLDER}/${i.Id}_${esc(safeName(i[F.title]))}/ に保存されます</span>
+        <span style="font-size:11px;">${esc(folderPathOf(i).replace(SITE_PATH,''))}/ に保存されます<br>顧客向けPDFは「${esc(safeName(i[F.title]||'物件資料').slice(0,60))}.pdf」の名前で保存されます</span>
       </div>
       <input type="file" id="picker" style="display:none" multiple onchange="handleFiles(this.files)">
       `:`<div class="warnbox">ファイルを添付するには、先に「保存」して物件を登録してください（保存後にフォルダが作られます）。</div>`}
-      ${fileRow('顧客向けPDF',urlOf(i[F.pdf]),true)}
+      ${fileRow('顧客向けPDF',urlOf(i[F.pdf]),true,pdfDispName(i),pdfNeedsRename(i)?'<button class="bk-btn" onclick="renamePdf()">ファイル名を物件名に直す</button>':'')}
       ${fileRow('その他資料',urlOf(i[F.other]))}
       ${fileRow('元データ',urlOf(i[F.src]))}
       ${fileRow('物件フォルダ',urlOf(i[F.folder]))}
@@ -814,11 +853,40 @@ function renderForm(){
   </div>`;
   if(i.Id)initDropzone();
 }
-function fileRow(label,url,copy){
+function fileRow(label,url,copy,dispName,extra){
   if(!url)return `<div class="filelink"><span style="color:var(--text-muted);min-width:100px;">${label}</span><span style="color:var(--text-muted);">未登録</span></div>`;
+  let nm=dispName;
+  if(!nm){try{nm=decodeURIComponent(url.split('/').pop().split('?')[0]);}catch(e){nm=url.split('/').pop();}}
   return `<div class="filelink"><span style="color:var(--text-sub);min-width:100px;">${label}</span>
-    <a href="${esc(url)}" target="_blank">${esc(decodeURIComponent(url.split('/').pop()))}</a>
-    ${copy?`<button class="bk-btn" onclick="copyLink('${esc(url)}')">リンクをコピー</button>`:''}</div>`;
+    <a href="${esc(url)}" target="_blank">${esc(nm)}</a>
+    ${copy?`<button class="bk-btn" onclick="copyLink('${esc(url)}')">リンクをコピー</button>`:''}${extra||''}</div>`;
+}
+function realName(url){try{return decodeURIComponent(String(url).split('/').pop().split('?')[0]);}catch(e){return String(url).split('/').pop();}}
+function pdfDispName(i){
+  const u=urlOf(i[F.pdf]); if(!u)return null;
+  return i[F.title]?safeName(pdfFileName(i[F.title],u,0)):realName(u);
+}
+function pdfNeedsRename(i){
+  const u=urlOf(i[F.pdf]); if(!u||!i[F.title])return false;
+  return realName(u)!==pdfDispName(i);
+}
+async function renamePdf(){
+  if(!cur||!cur.Id)return;
+  const u=urlOf(cur[F.pdf]); if(!u)return;
+  let oldPath; try{oldPath=decodeURIComponent(new URL(u).pathname);}catch(e){toast('URLを解釈できません');return;}
+  const dir=oldPath.slice(0,oldPath.lastIndexOf('/'));
+  const want=safeName(pdfFileName(cur[F.title],oldPath,0));
+  if(oldPath.slice(oldPath.lastIndexOf('/')+1)===want){toast('すでに物件名になっています');return;}
+  if(!confirm(`顧客向けPDFのファイル名を\n「${want}」\nに変更します。よろしいですか？\n\n※以前に配布したリンクは開けなくなります`))return;
+  try{
+    const newPath=dir+'/'+want;
+    await spMoveFile(oldPath,newPath);
+    const id=cur.Id;
+    await spUpdate(id,{[F.pdf]:{__metadata:{type:'SP.FieldUrlValue'},Description:want,Url:'https://shoeih.sharepoint.com'+newPath}});
+    toast('ファイル名を変更しました');
+    await loadItems();
+    cur=items.find(x=>x.Id===id)||cur; renderForm();
+  }catch(e){toast(e.message);}
 }
 function copyLink(u){navigator.clipboard.writeText(u).then(()=>toast('顧客向けPDFのリンクをコピーしました'));}
 function syncStatus(){const v=document.getElementById('f_sale').value;const st=document.getElementById('head-status');st.textContent=v||'—';st.className='st-pill st-'+v;}
@@ -879,6 +947,31 @@ async function notifyNow(){
   }catch(e){toast(e.message);}
 }
 
+/* ================= 削除 ================= */
+async function removeItem(){
+  if(!cur||!cur.Id)return;
+  const name=cur[F.title]||'(名称未設定)';
+  const hasFile=!!(urlOf(cur[F.folder])||urlOf(cur[F.pdf])||urlOf(cur[F.other])||urlOf(cur[F.src]));
+  const msg=`「${name}」を削除します。\n\n・一覧（SharePointの未公開物件マスター）から消えます`
+    +(hasFile?`\n・添付ファイルは物件フォルダごと削除します`:'')
+    +`\n・いずれもSharePointのごみ箱に入るので、必要なら復元できます\n\n削除してよろしいですか？`;
+  if(!confirm(msg))return;
+  const btn=document.getElementById('del-btn');
+  if(btn)btn.disabled=true;
+  try{
+    if(hasFile){
+      try{await spRecycleFolder(folderPathOf(cur));}
+      catch(e){if(!confirm('フォルダの削除に失敗しました（'+e.message+'）。\n物件データだけ削除して続けますか？')){if(btn)btn.disabled=false;return;}}
+    }
+    await spRecycle(cur.Id);
+    cur=null;
+    showList();
+    await loadItems();
+    toast('削除しました（SharePointのごみ箱から復元できます）');
+  }catch(e){toast(e.message);}
+  finally{if(btn)btn.disabled=false;}
+}
+
 /* ================= ファイル ================= */
 function initDropzone(){
   const dz=document.getElementById('dz');
@@ -887,14 +980,26 @@ function initDropzone(){
   ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('over');}));
   dz.addEventListener('drop',e=>handleFiles(e.dataTransfer.files));
 }
+function extOf(name){const m=String(name||'').match(/\.[^.\/]+$/);return m?m[0]:'';}
+/* 顧客向けPDFは、顧客に渡したときに物件名が見えるようファイル名を「物件名.拡張子」にする */
+function pdfFileName(title,orig,idx){
+  const base=safeName(title).slice(0,60)||'物件資料';
+  return base+(idx>0?`(${idx+1})`:'')+extOf(orig);
+}
 async function handleFiles(files){
   if(!cur||!cur.Id||!files||!files.length)return;
   const kind=document.getElementById('f_kind').value;
-  const folder=`${SITE_PATH}/${DOCLIB}/${ROOT_FOLDER}/${cur.Id}_${safeName(cur[F.title])}`;
+  const folder=folderPathOf(cur);
   const dz=document.getElementById('dz');
   try{
-    let last='',lastName='';
-    for(const f of files){if(dz)dz.textContent='アップロード中… '+f.name;last=await uploadFile(f,folder);lastName=f.name;}
+    let last='',lastName='',n=0;
+    for(const f of files){
+      if(dz)dz.textContent='アップロード中… '+f.name;
+      const forced=(kind==='pdf')?pdfFileName(cur[F.title],f.name,n):null;
+      last=await uploadFile(f,folder,forced);
+      lastName=safeName(forced||f.name);
+      n++;
+    }
     const col={src:F.src,pdf:F.pdf,other:F.other}[kind];
     const body={};
     body[col]={__metadata:{type:'SP.FieldUrlValue'},Description:lastName,Url:last};
