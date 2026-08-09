@@ -213,6 +213,28 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .log-badge.LP{background:#fdf0d5;color:#8a5c0a;}
 .log-badge.オンライン{background:#ede9fe;color:#5b21b6;}
 .log-badge.その他{background:#f5f5f5;color:#6b7280;}
+.log-badge.通話{background:#d9f0ee;color:#0f766e;}
+.log-badge.不通{background:#f1f1ef;color:#9ca3af;}
+.log-badge.メール{background:#e2e8f5;color:#3b5f8a;}
+/* 追客系（KPI対象外）は視覚的に分離する。同じ並びに置くと結局KPIとして読まれるため。 */
+.log-quick-sub-label{font-size:10px;color:var(--text-muted);letter-spacing:.04em;margin:2px 0 -2px;}
+.log-quick.sub{grid-template-columns:repeat(3,1fr);}
+.log-quick.sub .log-quick-btn{padding:8px 4px;font-size:11px;color:var(--text-sub);border-style:dashed;}
+.log-quick.sub .log-quick-btn.selected{border-style:solid;}
+.log-quick-btn:disabled{opacity:.5;cursor:default;}
+/* 顧客カードの最終接触バッジ */
+.touch-pill{font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;margin-left:auto;white-space:nowrap;}
+.touch-pill.fresh{background:#d4eddf;color:#166534;}
+.touch-pill.mid{background:#f1f1ef;color:#6b7280;}
+.touch-pill.stale{background:#fbe3e3;color:#9a2323;}
+.touch-pill.never{background:#fdf0d5;color:#8a5c0a;}
+/* 今週の追客サマリー */
+.week-panel{margin:0 12px 8px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;background:var(--bg);font-size:11px;color:var(--text-sub);}
+.week-panel .wp-title{font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;margin-bottom:6px;}
+.week-panel .wp-row{display:flex;gap:10px;flex-wrap:wrap;}
+.week-panel b{font-size:14px;color:var(--text);}
+.week-panel .wp-alert{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);color:#9a2323;font-weight:600;cursor:pointer;}
+.week-panel .wp-alert.ok{color:#166534;cursor:default;}
 .selector-wrap{position:relative;}
 .selector-trigger{width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;cursor:pointer;text-align:left;display:flex;justify-content:space-between;align-items:center;}
 .selector-trigger:after{content:'▾';color:var(--text-muted);}
@@ -340,8 +362,10 @@ body.readonly #import-btn{display:none!important;}
           <option value="hankyo_old">反響が古い順</option>
           <option value="name">氏名順（カナ）</option>
           <option value="rank">ランク高い順</option>
+          <option value="touch_old">最終接触が古い順（追客リスト）</option>
         </select>
       </div>
+      <div class="week-panel" id="week-panel" style="display:none;"></div>
       <div class="sidebar-count" id="list-count">--</div>
       <div class="sidebar-list" id="customer-list"></div>
       <div class="sidebar-add">
@@ -671,6 +695,42 @@ async function loadCustomers(){
   hideLoading();
 }
 
+/* ============================================================
+   活動履歴の種別区分
+   TOUCH_TYPES     : 相手と実際にやり取りできたもの＝「接触」
+   APPROACH_TYPES  : 上記＋こちらから働きかけただけのもの（不通・メール送信）
+   放置検知は TOUCH で見る。アプローチだけ新しくて接触が古い先は
+   「追客不足」ではなく「手段を変えろ」のサインなので扱いが違う。
+   ※ダッシュボードのKPI集計は ANNAI_TYPES / RAISHA_TYPES のホワイトリスト方式なので、
+     通話・不通・メールを足してもKPIには一切乗らない。
+   ============================================================ */
+const TOUCH_TYPES=['案内','再案内','来社','LP','オンライン','その他','通話'];
+const APPROACH_TYPES=[...TOUCH_TYPES,'不通','メール'];
+const MEMO_REQUIRED=['通話'];
+
+function lastLogDate(c,types){
+  let best=null;
+  for(const l of (c.logs||[])){
+    if(!types.includes(l.type)||!l.date) continue;
+    if(!best||l.date>best) best=l.date;
+  }
+  return best;
+}
+function daysSince(dateStr){
+  if(!dateStr) return null;
+  const t=new Date(dateStr+'T00:00:00').getTime();
+  if(isNaN(t)) return null;
+  return Math.floor((Date.now()-t)/86400000);
+}
+// 週の起点は月曜。週次で見るときの基準日を返す。
+function weekStart(){
+  const d=new Date(); d.setHours(0,0,0,0);
+  d.setDate(d.getDate()-((d.getDay()+6)%7));
+  return d.toISOString().slice(0,10);
+}
+
+let untouchedOnly=false;
+
 function renderList(){
   const q=document.getElementById('search-input').value;
   const fr=document.getElementById('filter-rank').value;
@@ -682,7 +742,13 @@ function renderList(){
     [normName(currentStaffName)]);
   // フェーズ複数選択（全選択または未選択のときは絞り込みなし）
   const usePhase=selectedPhases.size>0 && selectedPhases.size<PHASES.length;
+  const ws0=weekStart();
   const f=customers.filter(c=>{
+    if(untouchedOnly){
+      if(c.rank!=='S'&&c.rank!=='A') return false;
+      const t=lastLogDate(c,TOUCH_TYPES);
+      if(t&&t>=ws0) return false;
+    }
     if(visibleStaff&&!visibleStaff.has(normName(c.staff))) return false;
     if(fs&&normName(c.staff)!==normName(fs)) return false;
     if(q&&!c.name.includes(q)&&!c.kana.includes(q)&&!(c.address||'').includes(q)) return false;
@@ -706,14 +772,77 @@ function renderList(){
       f.sort((a,b)=>(a.kana||a.name||'').localeCompare(b.kana||b.name||'','ja'));
     }else if(sort==='rank'){
       f.sort((a,b)=>(rankOrder[a.rank]??9)-(rankOrder[b.rank]??9));
+    }else if(sort==='touch_old'){
+      // 一度も接触がない先を最優先。次に接触が古い順。これがそのまま架電リストになる。
+      f.sort((a,b)=>{
+        const ta=lastLogDate(a,TOUCH_TYPES),tb=lastLogDate(b,TOUCH_TYPES);
+        if(!ta&&!tb) return (rankOrder[a.rank]??9)-(rankOrder[b.rank]??9);
+        if(!ta) return -1;
+        if(!tb) return 1;
+        return ta.localeCompare(tb);
+      });
     }
   }
+  renderWeekPanel(f);
   document.getElementById('list-count').textContent=f.length+'件';
-  document.getElementById('customer-list').innerHTML=f.map(c=>`
+  document.getElementById('customer-list').innerHTML=f.map(c=>{
+    const d=daysSince(lastLogDate(c,TOUCH_TYPES));
+    const pill=d===null?'<span class="touch-pill never">未接触</span>'
+      :d<=7?`<span class="touch-pill fresh">${d}日</span>`
+      :d<=30?`<span class="touch-pill mid">${d}日</span>`
+      :`<span class="touch-pill stale">${d}日</span>`;
+    return `
     <div class="cust-item${c.id===selectedId?' active':''}" onclick="selectCustomer(${c.id})">
       <div class="cust-row1"><span class="cust-name">${c.name}</span><span class="rank-pill r${(c.rank||'d').toLowerCase()}">${c.rank}</span></div>
-      <div class="cust-row2"><span class="phase-dot"></span><span class="cust-phase">${c.cases.map(x=>x.phase).join(' / ')}</span></div>
-    </div>`).join('');
+      <div class="cust-row2"><span class="phase-dot"></span><span class="cust-phase">${c.cases.map(x=>x.phase).join(' / ')}</span>${pill}</div>
+    </div>`;}).join('');
+}
+
+/* 今週の追客サマリー。
+   人別の架電数ランキングは意図的に出していない。見えている数字は必ず目標として
+   扱われるため、「かける数を増やせ」ではなく「取りこぼしを埋めろ」の形で見せる。 */
+function renderWeekPanel(f){
+  const panel=document.getElementById('week-panel');
+  if(!panel) return;
+  if(!customers.length){panel.style.display='none';return;}
+  const ws=weekStart();
+  let call=0,futsu=0,mail=0,annai=0;
+  for(const c of f){
+    for(const l of (c.logs||[])){
+      if(!l.date||l.date<ws) continue;
+      if(l.type==='通話')call++;
+      else if(l.type==='不通')futsu++;
+      else if(l.type==='メール')mail++;
+      else if(TOUCH_TYPES.includes(l.type))annai++;
+    }
+  }
+  // 未タッチ＝S/Aランクで今週まだ接触していない先
+  const hot=f.filter(c=>c.rank==='S'||c.rank==='A');
+  const untouched=hot.filter(c=>{
+    const t=lastLogDate(c,TOUCH_TYPES);
+    return !t||t<ws;
+  });
+  const conn=call+futsu>0?Math.round(call/(call+futsu)*100):null;
+  panel.style.display='block';
+  panel.innerHTML=`
+    <div class="wp-title">今週の追客（${ws.slice(5).replace('-','/')}〜・KPI対象外）</div>
+    <div class="wp-row">
+      <span>通話 <b>${call}</b></span>
+      <span>不通 <b>${futsu}</b></span>
+      <span>メール <b>${mail}</b></span>
+      <span>案内系 <b>${annai}</b></span>
+      ${conn!=null?`<span>接続率 <b>${conn}%</b></span>`:''}
+    </div>
+    ${untouched.length
+      ? `<div class="wp-alert" onclick="showUntouched()">⚠ S/Aランクで今週ノータッチ ${untouched.length}件 / ${hot.length}件 — クリックで絞り込み</div>`
+      : `<div class="wp-alert ok">✓ S/Aランク ${hot.length}件、今週すべて接触済み</div>`}`;
+}
+
+// 未タッチだけに絞る（トグル）。ソートも追客リスト順に切り替える。
+function showUntouched(){
+  untouchedOnly=!untouchedOnly;
+  if(untouchedOnly){const s=document.getElementById('sort-select'); if(s) s.value='touch_old';}
+  renderList();
 }
 
 function selectCustomer(id){selectedId=id;selectedCaseIdx=0;renderList();renderDetail();document.querySelector('.body')?.classList.add('show-detail');}
@@ -788,6 +917,12 @@ function renderDetail(){
             <button class="log-quick-btn" data-type="オンライン" onclick="selectLogType('オンライン')">💻 オンライン</button>
             <button class="log-quick-btn" data-type="その他" onclick="selectLogType('その他')">📝 その他</button>
           </div>
+          <div class="log-quick-sub-label">追客（KPI対象外）</div>
+          <div class="log-quick sub">
+            <button class="log-quick-btn" data-type="通話" onclick="selectLogType('通話')">📞 通話</button>
+            <button class="log-quick-btn" id="btn-futsu" data-type="不通" onclick="quickLogFutsu()">📵 不通</button>
+            <button class="log-quick-btn" data-type="メール" onclick="selectLogType('メール')">✉️ メール</button>
+          </div>
           <div class="log-form" id="log-form" style="display:none;">
             <div class="log-form-row">
               <input type="date" id="log-date" value="${new Date().toISOString().slice(0,10)}"/>
@@ -798,6 +933,7 @@ function renderDetail(){
               <button class="log-save-btn" onclick="saveLog()">記録する</button>
             </div>
             <textarea id="log-memo" rows="2" placeholder="メモ（任意）"></textarea>
+            <div id="log-memo-hint" style="font-size:10px;color:var(--text-muted);display:none;">通話はメモ必須（誰と何を話したか。次のアクションまで書けると日報がそのまま作れます）</div>
           </div>
           <div class="log-list" id="log-list">
             ${(c.logs||[]).length===0?'<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:12px;">まだ活動記録がありません</div>':
@@ -1193,6 +1329,40 @@ function selectLogType(type){
   document.querySelectorAll('.log-quick-btn').forEach(b=>b.classList.toggle('selected',b.dataset.type===type));
   const form=document.getElementById('log-form');
   if(form){form.style.display='flex';form.style.flexDirection='column';document.getElementById('log-type-label').textContent=type;}
+  const req=MEMO_REQUIRED.includes(type);
+  const ta=document.getElementById('log-memo');
+  if(ta) ta.placeholder=req?'メモ（必須）':'メモ（任意）';
+  const hint=document.getElementById('log-memo-hint');
+  if(hint) hint.style.display=req?'block':'none';
+  if(req&&ta) setTimeout(()=>ta.focus(),0);
+}
+
+/* 不通はワンクリック即保存。日付＝今日、担当＝ログイン者、メモなし。
+   1日20〜30件かける前提なので、ここに1操作でも足すと運用が死ぬ。 */
+async function quickLogFutsu(){
+  const c=customers.find(x=>x.id===selectedId);
+  if(!c){showToast('顧客を選択してください',true);return;}
+  const btn=document.getElementById('btn-futsu');
+  if(btn&&btn.disabled) return;
+  if(btn) btn.disabled=true;
+  const date=new Date().toISOString().slice(0,10);
+  const staffSel=currentStaffName||'';
+  try{
+    const r=await spAdd('活動履歴リスト',{
+      Title:c.name+'_不通_'+date,
+      'OData__x6848__x4ef6_ID':String(selectedId),
+      'OData__x65e5__x4ed8_':new Date(date).toISOString(),
+      'OData__x7a2e__x5225_':'不通',
+      'OData__x5185__x5bb9_':'',
+      'OData__x62c5__x5f53__x8005_':staffSel
+    });
+    if(!c.logs)c.logs=[];
+    c.logs.push({id:r.d?.ID,type:'不通',date,memo:'',staff:staffSel});
+    renderDetail();
+    renderList();
+    showToast('不通を記録しました');
+  }catch(e){showToast('エラー: '+e.message,true);
+    const b=document.getElementById('btn-futsu'); if(b) b.disabled=false;}
 }
 
 async function saveLog(){
@@ -1200,6 +1370,11 @@ async function saveLog(){
   if(!c||!selectedLogType){showToast('種別を選択してください',true);return;}
   const date=document.getElementById('log-date').value;
   const memo=document.getElementById('log-memo').value;
+  if(MEMO_REQUIRED.includes(selectedLogType)&&!memo.trim()){
+    showToast('通話はメモが必須です',true);
+    document.getElementById('log-memo')?.focus();
+    return;
+  }
   const staffSel=document.getElementById('log-staff-select')?.value||currentStaffName||'';
   showLoading('記録中...');
   try{
@@ -1215,6 +1390,7 @@ async function saveLog(){
     c.logs.push({id:r.d?.ID,type:selectedLogType,date,memo,staff:staffSel});
     selectedLogType='';
     renderDetail();
+    renderList();
     showToast('活動を記録しました');
   }catch(e){showToast('エラー: '+e.message,true);}
   hideLoading();
