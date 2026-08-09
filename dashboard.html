@@ -131,6 +131,19 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 
 /* KPI Table */
 .section-title{font-size:13px;font-weight:700;color:var(--text2);margin-bottom:10px;}
+/* 追客カバレッジ：KPIカードと同じ見た目にすると結局KPIとして読まれるので、
+   破線・低彩度で明確に別物として見せる。 */
+.coverage-block{border:1px dashed var(--border);border-radius:10px;padding:14px 16px;margin-bottom:18px;background:transparent;}
+.coverage-title{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.05em;margin-bottom:10px;}
+.cov-row{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;}
+.cov-item{display:flex;flex-direction:column;gap:2px;}
+.cov-item .cv{font-size:22px;font-weight:700;color:var(--text2);line-height:1;}
+.cov-item .cl{font-size:10px;color:var(--muted);}
+.cov-alert{margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;}
+.cov-alert .bad{color:#9a2323;font-weight:700;}
+.cov-alert .ok{color:#176b47;font-weight:700;}
+.cov-names{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7;}
+.cov-note{font-size:10px;color:var(--muted);margin-top:10px;line-height:1.6;}
 .kpi-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
 .kpi-table{width:100%;border-collapse:collapse;}
 .kpi-table th{padding:10px 14px;font-size:11px;font-weight:700;color:var(--text3);text-align:center;background:var(--bg);border-bottom:1px solid var(--border);}
@@ -331,6 +344,12 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
       <div class="section-title" id="summary-title">当月サマリー</div>
       <div class="summary-row" id="summary-row"></div>
       <div id="hankyo-breakdown"></div>
+    </div>
+
+    <!-- 追客カバレッジ：KPIではない。数を competition にしないため、あえて別枠・別配色。 -->
+    <div class="coverage-block">
+      <div class="coverage-title">追客カバレッジ（KPI対象外・直近7日）</div>
+      <div id="coverage-body"></div>
     </div>
 
     <!-- 担当者別KPI -->
@@ -796,6 +815,7 @@ async function loadData(){
       document.getElementById('trend-section').style.display='none';
     }
     renderHankyoBreakdown(customers,months);
+    renderCoverage(customers,cases,logs);
 
     if(denpyoData) renderUriage();
     if(shiireData) renderShiire();
@@ -845,6 +865,81 @@ function calcHankyoBreakdown(customers,months){
     else ex.set(owner,(ex.get(owner)||0)+1);
   }
   return {total,included,ex};
+}
+
+
+/* ============================================================
+   追客カバレッジ
+   人別の架電数は意図的に出していない。ランキングにした瞬間にKPIになり、
+   中身のない架電を稼ぐ動きが出るため。見るのは「取りこぼし」だけ。
+   通話・不通・メールは ANNAI_TYPES / RAISHA_TYPES に含まれないので
+   既存のKPI集計には一切影響しない。
+   ============================================================ */
+const COV_TOUCH=['案内','再案内','来社','LP','オンライン','その他','通話'];
+const COV_HOT_PHASES=['連絡済','案内','物件待ち','来社','申込'];
+
+function renderCoverage(customers,cases,logs){
+  const el=document.getElementById('coverage-body');
+  if(!el) return;
+  const now=Date.now();
+  const d7=new Date(now-7*86400000).toISOString().slice(0,10);
+  const d30=new Date(now-30*86400000).toISOString().slice(0,10);
+
+  let call=0,futsu=0,mail=0;
+  for(const l of logs){
+    const dt=(l['OData__x65e5__x4ed8_']||'').slice(0,10);
+    if(!dt||dt<d7) continue;
+    const t=l['OData__x7a2e__x5225_']||'';
+    if(t==='通話')call++; else if(t==='不通')futsu++; else if(t==='メール')mail++;
+  }
+
+  // 追客対象＝案件フェーズが「動いている」顧客。終了・契約済以降は除く。
+  const caseByCust=new Map();
+  for(const c of cases){
+    const cid=c['OData__x9867__x5ba2_ID']; if(!cid) continue;
+    if(!caseByCust.has(cid)) caseByCust.set(cid,[]);
+    caseByCust.get(cid).push(c['OData__x30d5__x30a7__x30fc__x30ba_']||'');
+  }
+  const touchByCust=new Map();
+  for(const l of logs){
+    if(!COV_TOUCH.includes(l['OData__x7a2e__x5225_']||'')) continue;
+    const cid=String(l['OData__x6848__x4ef6_ID']||''); if(!cid) continue;
+    const dt=(l['OData__x65e5__x4ed8_']||'').slice(0,10); if(!dt) continue;
+    if(!touchByCust.has(cid)||dt>touchByCust.get(cid)) touchByCust.set(cid,dt);
+  }
+
+  const targets=customers.filter(c=>{
+    const owner=c['OData__x62c5__x5f53__x8005_']||'';
+    if(!ownerIncluded(owner,null)) return false;
+    const phases=caseByCust.get(String(c.ID))||[];
+    return phases.some(p=>COV_HOT_PHASES.includes(p));
+  });
+  const touched7=targets.filter(c=>(touchByCust.get(String(c.ID))||'')>=d7);
+  const stale30=targets.filter(c=>(touchByCust.get(String(c.ID))||'')<d30);
+  const pct=targets.length?Math.round(touched7.length/targets.length*100):null;
+  const conn=(call+futsu)>0?Math.round(call/(call+futsu)*100):null;
+
+  el.innerHTML=`
+    <div class="cov-row">
+      <div class="cov-item"><span class="cv">${targets.length}</span><span class="cl">追客対象</span></div>
+      <div class="cov-item"><span class="cv">${touched7.length}</span><span class="cl">7日以内に接触</span></div>
+      <div class="cov-item"><span class="cv">${pct!=null?pct+'%':'—'}</span><span class="cl">カバレッジ</span></div>
+      <div class="cov-item"><span class="cv">${call}</span><span class="cl">通話（7日）</span></div>
+      <div class="cov-item"><span class="cv">${futsu}</span><span class="cl">不通（7日）</span></div>
+      <div class="cov-item"><span class="cv">${mail}</span><span class="cl">メール（7日）</span></div>
+      <div class="cov-item"><span class="cv">${conn!=null?conn+'%':'—'}</span><span class="cl">接続率</span></div>
+    </div>
+    <div class="cov-alert">
+      ${stale30.length
+        ? `<span class="bad">⚠ 30日以上ノータッチ ${stale30.length}件</span>
+           <div class="cov-names">${stale30.slice(0,20).map(c=>`${c.Title||'(名前なし)'}<span style="opacity:.6">／${c['OData__x62c5__x5f53__x8005_']||'担当なし'}</span>`).join(' ・ ')}${stale30.length>20?` ほか${stale30.length-20}件`:''}</div>`
+        : `<span class="ok">✓ 30日以上ノータッチの追客対象はありません</span>`}
+    </div>
+    <div class="cov-note">
+      接触＝案内・再案内・来社・LP・オンライン・その他・通話（不通とメール送信は含まない）。<br>
+      追客対象＝案件フェーズが 連絡済／案内／物件待ち／来社／申込 のいずれかの顧客。<br>
+      ここの数字はKPIではありません。追う対象は件数ではなく、上の「ノータッチ」リストです。
+    </div>`;
 }
 
 function renderHankyoBreakdown(customers,months){
