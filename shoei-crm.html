@@ -228,6 +228,11 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .touch-pill.mid{background:#f1f1ef;color:#6b7280;}
 .touch-pill.stale{background:#fbe3e3;color:#9a2323;}
 .touch-pill.never{background:#fdf0d5;color:#8a5c0a;}
+/* 重複疑い（氏名+住所 or 電話番号が既存の別顧客と一致/類似）。自動マージはしない、人が見るための目印。 */
+.dup-pill{font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;background:#fdf0d5;color:#8a5c0a;margin-left:6px;white-space:nowrap;}
+.dup-banner{margin:0 0 10px;padding:8px 12px;background:#fdf0d5;color:#8a5c0a;border-radius:8px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.dup-banner a{color:#8a5c0a;font-weight:700;text-decoration:underline;cursor:pointer;}
+.dup-clear-btn{margin-left:auto;padding:4px 10px;border:1px solid #8a5c0a;background:transparent;color:#8a5c0a;border-radius:6px;font-size:11px;cursor:pointer;}
 /* 今週の追客サマリー */
 .week-panel{margin:0 12px 8px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;background:var(--bg);font-size:11px;color:var(--text-sub);}
 .week-panel .wp-title{font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;margin-bottom:6px;}
@@ -658,6 +663,8 @@ async function loadCustomers(){
       mediaDatetime:i['OData__x53cd__x97ff__x6642__x9593_']||'',
       mediaSource:i['OData__x53cd__x97ff__x5a92__x4f53_']||'',
       mediaPropName:i['OData__x53cd__x97ff__x7269__x4ef6_']||'',
+      dupFlag:!!i.DupFlag,
+      dupCandidateIds:(i.DupCandidatesId&&i.DupCandidatesId.results)||[],
       cases:[],logs:[]
     }));
     const caseItems=await spGetItems('案件リスト');
@@ -730,6 +737,7 @@ function weekStart(){
 }
 
 let untouchedOnly=false;
+let dupOnly=false;
 
 function renderList(){
   const q=document.getElementById('search-input').value;
@@ -749,6 +757,7 @@ function renderList(){
       const t=lastLogDate(c,TOUCH_TYPES);
       if(t&&t>=ws0) return false;
     }
+    if(dupOnly&&!c.dupFlag) return false;
     if(visibleStaff&&!visibleStaff.has(normName(c.staff))) return false;
     if(fs&&normName(c.staff)!==normName(fs)) return false;
     if(q&&!c.name.includes(q)&&!c.kana.includes(q)&&!(c.address||'').includes(q)) return false;
@@ -793,7 +802,7 @@ function renderList(){
       :`<span class="touch-pill stale">${d}日</span>`;
     return `
     <div class="cust-item${c.id===selectedId?' active':''}" onclick="selectCustomer(${c.id})">
-      <div class="cust-row1"><span class="cust-name">${c.name}</span><span class="rank-pill r${(c.rank||'d').toLowerCase()}">${c.rank}</span></div>
+      <div class="cust-row1"><span class="cust-name">${c.name}</span>${c.dupFlag?'<span class="dup-pill" title="重複の疑いあり">⚠重複疑い</span>':''}<span class="rank-pill r${(c.rank||'d').toLowerCase()}">${c.rank}</span></div>
       <div class="cust-row2"><span class="phase-dot"></span><span class="cust-phase">${c.cases.map(x=>x.phase).join(' / ')}</span>${pill}</div>
     </div>`;}).join('');
 }
@@ -823,6 +832,7 @@ function renderWeekPanel(f){
     return !t||t<ws;
   });
   const conn=call+futsu>0?Math.round(call/(call+futsu)*100):null;
+  const dupCount=f.filter(c=>c.dupFlag).length;
   panel.style.display='block';
   panel.innerHTML=`
     <div class="wp-title">今週の追客（${ws.slice(5).replace('-','/')}〜・KPI対象外）</div>
@@ -835,7 +845,16 @@ function renderWeekPanel(f){
     </div>
     ${untouched.length
       ? `<div class="wp-alert" onclick="showUntouched()">⚠ S/Aランクで今週ノータッチ ${untouched.length}件 / ${hot.length}件 — クリックで絞り込み</div>`
-      : `<div class="wp-alert ok">✓ S/Aランク ${hot.length}件、今週すべて接触済み</div>`}`;
+      : `<div class="wp-alert ok">✓ S/Aランク ${hot.length}件、今週すべて接触済み</div>`}
+    ${dupCount
+      ? `<div class="wp-alert" onclick="toggleDupOnly()">⚠ 重複疑いあり ${dupCount}件 — クリックで${dupOnly?'解除':'絞り込み'}</div>`
+      : ''}`;
+}
+
+// 重複疑いだけに絞る（トグル）
+function toggleDupOnly(){
+  dupOnly=!dupOnly;
+  renderList();
 }
 
 // 未タッチだけに絞る（トグル）。ソートも追客リスト順に切り替える。
@@ -864,6 +883,9 @@ function renderDetail(){
           <button class="act-btn primary" onclick="saveCustomer()">保存</button>
         </div>
       </div>
+      ${c.dupFlag?`<div class="dup-banner">⚠ 重複の疑いがある顧客: ${
+        (c.dupCandidateIds||[]).map(id=>{const o=customers.find(x=>x.id===id);return o?`<a onclick="event.preventDefault();selectCustomer(${o.id})">${o.name}</a>`:null;}).filter(Boolean).join('、')||'（対象データなし。読み込み直後は反映に時間がかかることがあります）'
+      } <button class="dup-clear-btn" onclick="clearDupFlag(${c.id})">疑いを解除</button></div>`:''}
       <div class="phase-row">
         <span class="phase-label-sm">フェーズ</span>
         <div class="phase-badge" onclick="openModal()">${cs.phase} ▾</div>
@@ -1050,6 +1072,45 @@ function setPhase(p){
   closeModal();renderDetail();renderList();
 }
 
+/* ============================================================
+   重複疑いチェック（氏名+住所 / 電話番号）
+   ------------------------------------------------------------
+   自動マージはしない。あくまで「疑いフラグを立てて人が見る」ための
+   ゆるい判定にとどめる（凝ったスコアリングは意図的にやらない）。
+   - 電話番号が完全一致 → ほぼ確実。トーストでも強めに警告する
+   - 氏名が完全一致 かつ 住所（番地まで）が一致/部分一致 → 疑いフラグのみ
+   ============================================================ */
+function normText(s){
+  // 全角/半角ゆれとスペースの差を吸収するだけの単純な正規化。
+  return String(s||'').normalize('NFKC').replace(/[\s　]/g,'');
+}
+function findDupMatches(c){
+  const telN=normalizePhone(c.tel);
+  const nameN=normText(c.name);
+  const addrN=normText(c.address);
+  let phoneMatch=null;
+  const ids=new Set();
+  for(const o of customers){
+    if(o.id===c.id) continue;
+    if(telN && normalizePhone(o.tel)===telN){ phoneMatch=o; ids.add(o.id); continue; }
+    if(nameN && addrN && normText(o.name)===nameN){
+      const oAddrN=normText(o.address);
+      if(oAddrN && (oAddrN.includes(addrN)||addrN.includes(oAddrN))) ids.add(o.id);
+    }
+  }
+  return {phoneMatch, ids:[...ids]};
+}
+async function clearDupFlag(id){
+  const c=customers.find(x=>x.id===id);
+  if(!c) return;
+  try{
+    await spUpdate('顧客リスト',id,{DupFlag:false,DupCandidatesId:{results:[]}});
+    c.dupFlag=false; c.dupCandidateIds=[];
+    renderDetail();renderList();
+    showToast('重複疑いを解除しました');
+  }catch(e){ showToast('解除に失敗しました: '+e.message,true); }
+}
+
 async function saveCustomer(){
   const c=customers.find(x=>x.id===selectedId);
   if(!c) return;
@@ -1100,7 +1161,19 @@ async function saveCustomer(){
       if(cs.id){await spUpdate('案件リスト',cs.id,body);}
       else{const r=await spAdd('案件リスト',body);cs.id=r.d?.ID;}
     }
-    showToast('保存しました');renderList();
+    // 重複疑いチェック。DupFlag/DupCandidates列が未作成の環境でも
+    // 通常の保存自体は失敗させたくないので、あえて別リクエスト・別try/catchにしている。
+    let dupToast=null;
+    try{
+      const {phoneMatch,ids}=findDupMatches(c);
+      await spUpdate('顧客リスト',c.id,{DupFlag:ids.length>0,DupCandidatesId:{results:ids}});
+      c.dupFlag=ids.length>0; c.dupCandidateIds=ids;
+      if(phoneMatch) dupToast=`⚠ 電話番号が「${phoneMatch.name}」さんと一致します。重複の可能性があります`;
+    }catch(e){
+      console.warn('重複チェック列の更新をスキップしました（DupFlag/DupCandidates列が未作成の可能性）:',e.message);
+    }
+    renderList();renderDetail();
+    showToast(dupToast||'保存しました',!!dupToast);
   }catch(e){showToast('保存エラー: '+e.message,true);}
   hideLoading();
 }
@@ -1166,7 +1239,7 @@ async function newCustomer(){
     console.log('spAdd response:', JSON.stringify(r));
     if(!r||!r.d||!r.d.ID){showToast('エラー: SharePointからの応答が不正です。コンソールを確認してください。',true);hideLoading();return;}
     const id=r.d.ID;
-    customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',mediaDatetime:'',mediaSource:'',mediaPropName:'',memo:'',cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',kind:'',budgetMan:'',timing:'',media:'',mediaProp:'',mediaDate:'',keiyakuDate:'',memo:''}],logs:[]});
+    customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',mediaDatetime:'',mediaSource:'',mediaPropName:'',memo:'',dupFlag:false,dupCandidateIds:[],cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',kind:'',budgetMan:'',timing:'',media:'',mediaProp:'',mediaDate:'',keiyakuDate:'',memo:''}],logs:[]});
     selectedId=id;selectedCaseIdx=0;renderList();renderDetail();
     showToast('新規顧客を作成しました');
   }catch(e){showToast('エラー: '+e.message,true);}
