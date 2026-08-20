@@ -230,9 +230,14 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .touch-pill.never{background:#fdf0d5;color:#8a5c0a;}
 /* 重複疑い（氏名+住所 or 電話番号が既存の別顧客と一致/類似）。自動マージはしない、人が見るための目印。 */
 .dup-pill{font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;background:#fdf0d5;color:#8a5c0a;margin-left:6px;white-space:nowrap;}
-.dup-banner{margin:0 0 10px;padding:8px 12px;background:#fdf0d5;color:#8a5c0a;border-radius:8px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.dup-banner a{color:#8a5c0a;font-weight:700;text-decoration:underline;cursor:pointer;}
-.dup-clear-btn{margin-left:auto;padding:4px 10px;border:1px solid #8a5c0a;background:transparent;color:#8a5c0a;border-radius:6px;font-size:11px;cursor:pointer;}
+.dup-banner{margin:0 0 10px;padding:8px 12px;background:#fdf0d5;color:#8a5c0a;border-radius:8px;font-size:12px;}
+.dup-banner-title{font-weight:700;margin-bottom:6px;}
+.dup-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;border-top:1px solid rgba(138,92,10,.2);}
+.dup-row:first-of-type{border-top:none;}
+.dup-row a{color:#8a5c0a;font-weight:700;text-decoration:underline;cursor:pointer;}
+.dup-row-sub{font-size:11px;color:#8a5c0a;opacity:.75;}
+.dup-merge-btn{margin-left:auto;padding:4px 10px;border:none;background:#8a5c0a;color:#fff;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.dup-clear-btn{margin-top:6px;padding:4px 10px;border:1px solid #8a5c0a;background:transparent;color:#8a5c0a;border-radius:6px;font-size:11px;cursor:pointer;}
 /* 今週の追客サマリー */
 .week-panel{margin:0 12px 8px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;background:var(--bg);font-size:11px;color:var(--text-sub);}
 .week-panel .wp-title{font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;margin-bottom:6px;}
@@ -883,9 +888,21 @@ function renderDetail(){
           <button class="act-btn primary" onclick="saveCustomer()">保存</button>
         </div>
       </div>
-      ${c.dupFlag?`<div class="dup-banner">⚠ 重複の疑いがある顧客: ${
-        (c.dupCandidateIds||[]).map(id=>{const o=customers.find(x=>x.id===id);return o?`<a onclick="event.preventDefault();selectCustomer(${o.id})">${o.name}</a>`:null;}).filter(Boolean).join('、')||'（対象データなし。読み込み直後は反映に時間がかかることがあります）'
-      } <button class="dup-clear-btn" onclick="clearDupFlag(${c.id})">疑いを解除</button></div>`:''}
+      ${c.dupFlag?`<div class="dup-banner">
+        <div class="dup-banner-title">⚠ 重複の疑いがある顧客</div>
+        ${(c.dupCandidateIds||[]).map(id=>{
+          const o=customers.find(x=>x.id===id);
+          if(!o) return '';
+          const nCase=(o.cases||[]).filter(x=>x.id).length;
+          const nLog=(o.logs||[]).filter(x=>x.id).length;
+          return `<div class="dup-row">
+            <a onclick="event.preventDefault();selectCustomer(${o.id})">${o.name}</a>
+            <span class="dup-row-sub">(案件${nCase}件・活動履歴${nLog}件)</span>
+            <button class="dup-merge-btn" onclick="mergeDuplicate(${c.id},${o.id})">この顧客に統合</button>
+          </div>`;
+        }).join('')||'<div class="dup-row-sub">（対象データなし。読み込み直後は反映に時間がかかることがあります）</div>'}
+        <button class="dup-clear-btn" onclick="clearDupFlag(${c.id})">疑いを解除（統合しない）</button>
+      </div>`:''}
       <div class="phase-row">
         <span class="phase-label-sm">フェーズ</span>
         <div class="phase-badge" onclick="openModal()">${cs.phase} ▾</div>
@@ -1109,6 +1126,68 @@ async function clearDupFlag(id){
     renderDetail();renderList();
     showToast('重複疑いを解除しました');
   }catch(e){ showToast('解除に失敗しました: '+e.message,true); }
+}
+
+/* 重複統合：loseId の案件・活動履歴をすべて keepId に付け替えてから、loseId（顧客）を削除する。
+   案件・活動履歴そのものは削除しない（データを消さずに寄せるだけ）。取り消しはできない。 */
+async function mergeDuplicate(keepId, loseId){
+  if(!canEdit()){showToast('閲覧専用のアカウントのため統合できません',true);return;}
+  const keep=customers.find(x=>x.id===keepId);
+  const lose=customers.find(x=>x.id===loseId);
+  if(!keep||!lose) return;
+  const nCase=(lose.cases||[]).filter(x=>x.id).length;
+  const nLog=(lose.logs||[]).filter(x=>x.id).length;
+  if(!confirm(`「${lose.name}」の案件${nCase}件・活動履歴${nLog}件を「${keep.name}」に移してから、「${lose.name}」を削除します。\nこの操作は元に戻せません。よろしいですか？`)) return;
+  showLoading('統合中...');
+  try{
+    // ① loseの案件をkeepに付け替え。ラベルはkeep側の実件数の続きから振り直す（①②…の重複を避ける）。
+    const labels=['①','②','③','④','⑤','⑥','⑦','⑧'];
+    let n=keep.cases.filter(x=>x.id).length;
+    const movedCases=[];
+    for(const cs of lose.cases){
+      if(!cs.id) continue; // 未保存の空タブは移さない
+      n++;
+      const newLabel=`案件${labels[n-1]||n}`;
+      await spUpdate('案件リスト',cs.id,{
+        Title:newLabel,
+        'OData__x9867__x5ba2_ID':String(keepId),
+        'OData__x6848__x4ef6__x30e9__x30d9__x30':newLabel
+      });
+      cs.label=newLabel;
+      movedCases.push(cs);
+    }
+    if(movedCases.length){
+      keep.cases=keep.cases.filter(x=>x.id).concat(movedCases);
+      if(keep.cases.length===0) keep.cases=[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',kind:'',budgetMan:'',timing:'',media:'',mediaProp:'',mediaDate:'',keiyakuDate:'',memo:''}];
+    }
+    // ② loseの活動履歴をkeepに付け替え（活動履歴は案件ではなく顧客に直接紐づいている）
+    for(const l of lose.logs){
+      if(!l.id) continue;
+      await spUpdate('活動履歴リスト',l.id,{'OData__x6848__x4ef6_ID':String(keepId)});
+      keep.logs.push(l);
+    }
+    keep.logs.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    // ③ loseの顧客レコードを削除（案件・活動履歴は移動済みなので顧客だけ消す）
+    const token=await getToken();
+    const digest=await getDigest(token);
+    const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('顧客リスト')/items(${loseId})`,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'X-RequestDigest':digest,'IF-MATCH':'*','X-HTTP-Method':'DELETE'}
+    });
+    if(!r.ok&&r.status!==404) throw new Error(`顧客の削除に失敗 (HTTP ${r.status})`);
+    customers=customers.filter(x=>x.id!==loseId);
+    // ④ keep側の重複フラグを再判定（他にも候補が残っていればフラグは立ったまま）
+    const {ids}=findDupMatches(keep);
+    await spUpdate('顧客リスト',keepId,{DupFlag:ids.length>0,DupCandidatesId:{results:ids}});
+    keep.dupFlag=ids.length>0; keep.dupCandidateIds=ids;
+
+    selectedId=keepId; selectedCaseIdx=0;
+    renderList();renderDetail();
+    showToast(`統合しました（案件${nCase}件・活動履歴${nLog}件を移動）`);
+  }catch(e){
+    showToast('統合エラー: '+e.message,true);
+  }
+  hideLoading();
 }
 
 async function saveCustomer(){
