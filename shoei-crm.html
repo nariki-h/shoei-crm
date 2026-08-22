@@ -120,6 +120,8 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .rank-pill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;}
 .rs{background:#fef2ee;color:#c0392b;}.ra{background:#fef9ee;color:#9a6700;}.rb{background:#eef6ff;color:#1a5fa8;}.rc{background:#eefaf4;color:#166534;}.rd{background:#f5f5f5;color:#6b7280;}
 .cust-row2{display:flex;align-items:center;gap:6px;}
+.cust-hit{font-size:10px;color:#6b7280;background:#f4f4f2;border-radius:4px;padding:1px 5px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cust-hit b{color:#8a5c0a;font-weight:700;}
 .phase-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;}
 .cust-phase{font-size:11px;color:var(--text-sub);}
 .sidebar-add{padding:10px 12px;border-top:1px solid var(--border);}
@@ -348,7 +350,7 @@ body.readonly #import-btn{display:none!important;}
   <div class="body">
     <div class="sidebar">
       <div class="sidebar-search">
-        <input type="text" placeholder="氏名・カナ・住所で検索" id="search-input"/>
+        <input type="text" placeholder="氏名・電話・物件名などで横断検索" id="search-input" title="氏名／カナ／住所／電話番号／メール／勤務先／反響物件／反響媒体／共同申込人／希望エリア・路線・駅／備考 を横断検索します。スペース区切りでAND検索。"/>
       </div>
       <div class="sidebar-filters">
         <div class="selector-wrap" style="flex:1 1 100%;">
@@ -744,8 +746,63 @@ function weekStart(){
 let untouchedOnly=false;
 let dupOnly=false;
 
+/* ---- 横断検索 ----------------------------------------------------------
+   検索対象は氏名だけでなく電話番号・反響物件・住所など顧客／案件の主要項目。
+   ・NFKC正規化＋小文字化＋空白除去で全角半角・大文字小文字の揺れを吸収
+   ・ハイフン類（‐ ― − － ー）は '-' に統一
+   ・数字だけのトークンは電話番号として桁だけで照合（090-1234 → 09012345678 にヒット）
+   ・スペース区切りは AND 条件（例:「村上 世田谷」）
+   活動履歴の本文は意図的に対象外。件数が多く毎キーストロークの走査が重くなるため。 */
+function normSearch(v){
+  return String(v==null?'':v).normalize('NFKC').toLowerCase()
+    .replace(/[\u3041-\u3096]/g,ch=>String.fromCharCode(ch.charCodeAt(0)+0x60))
+    .replace(/[\u2010-\u2015\u2212\uff0d\u30fc]/g,'-')
+    .replace(/[\s\u3000]+/g,'');
+}
+function digitsOnly(v){return String(v==null?'':v).replace(/[^0-9]/g,'');}
+
+// [ラベル, 値] の配列。表示用にラベルを持たせ、どの項目で当たったかを一覧に出す。
+function custSearchFields(c){
+  const f=[
+    ['氏名',c.name],['カナ',c.kana],['住所',c.address],['電話',c.tel],
+    ['メール',c.email],['勤務先',c.company],['反響物件',c.mediaPropName],
+    ['反響媒体',c.mediaSource],['共同申込人',c.co_name],['共同勤務先',c.co_company],
+    ['備考',c.memo]
+  ];
+  for(const cs of (c.cases||[])){
+    f.push(['反響物件',cs.mediaProp]);
+    f.push(['希望エリア',cs.area]);
+    f.push(['希望路線',(cs.lines&&cs.lines.length)?cs.lines.join(' '):cs.line]);
+    f.push(['希望駅',(cs.stations&&cs.stations.length)?cs.stations.join(' '):cs.station]);
+    f.push(['希望種別',cs.kind]);
+    f.push(['希望条件',cs.memo]);
+  }
+  return f.filter(x=>x[1]);
+}
+
+// 全トークンがどこかの項目に当たれば hits（[{label,val}]）、1つでも外れたら null。
+function searchMatchCustomer(c,tokens){
+  const fields=custSearchFields(c).map(x=>[x[0],x[1],normSearch(x[1]),digitsOnly(x[1])]);
+  const hits=[];
+  for(const t of tokens){
+    const nt=normSearch(t);
+    const dt=digitsOnly(t);
+    const asPhone=dt.length>=3&&/^[0-9\-\u2010-\u2015\u2212\uff0d()\s\u3000]+$/.test(t);
+    let hit=null;
+    for(const fld of fields){
+      if((nt&&fld[2].indexOf(nt)>=0)||(asPhone&&fld[3]&&fld[3].indexOf(dt)>=0)){
+        hit={label:fld[0],val:fld[1]};break;
+      }
+    }
+    if(!hit) return null;
+    hits.push(hit);
+  }
+  return hits;
+}
+
 function renderList(){
   const q=document.getElementById('search-input').value;
+  const tokens=q.trim().split(/[\s\u3000]+/).filter(Boolean);
   const fr=document.getElementById('filter-rank').value;
   const fs=document.getElementById('filter-staff')?.value||'';
   const sort=document.getElementById('sort-select')?.value||'';
@@ -765,7 +822,13 @@ function renderList(){
     if(dupOnly&&!c.dupFlag) return false;
     if(visibleStaff&&!visibleStaff.has(normName(c.staff))) return false;
     if(fs&&normName(c.staff)!==normName(fs)) return false;
-    if(q&&!c.name.includes(q)&&!c.kana.includes(q)&&!(c.address||'').includes(q)) return false;
+    if(tokens.length){
+      const hits=searchMatchCustomer(c,tokens);
+      if(!hits) return false;
+      c._searchHits=hits;   // 一覧カードに「どこで当たったか」を出すため保持
+    }else{
+      c._searchHits=null;
+    }
     if(usePhase&&!c.cases.some(x=>selectedPhases.has(x.phase))) return false;
     if(fr&&c.rank!==fr) return false;
     return true;
@@ -809,7 +872,28 @@ function renderList(){
     <div class="cust-item${c.id===selectedId?' active':''}" onclick="selectCustomer(${c.id})">
       <div class="cust-row1"><span class="cust-name">${c.name}</span>${c.dupFlag?'<span class="dup-pill" title="重複の疑いあり">⚠重複疑い</span>':''}<span class="rank-pill r${(c.rank||'d').toLowerCase()}">${c.rank}</span></div>
       <div class="cust-row2"><span class="phase-dot"></span><span class="cust-phase">${c.cases.map(x=>x.phase).join(' / ')}</span>${pill}</div>
+      ${hitLine(c)}
     </div>`;}).join('');
+}
+
+/* 氏名・カナ以外の項目でヒットしたときだけ、一覧カードに根拠を1行出す。
+   氏名で当たった場合は見れば分かるので出さない。 */
+function hitLine(c){
+  const hits=c._searchHits;
+  if(!hits||!hits.length) return '';
+  const seen=new Set();
+  const parts=[];
+  for(const h of hits){
+    if(h.label==='氏名'||h.label==='カナ') continue;
+    const key=h.label+'/'+h.val;
+    if(seen.has(key)) continue;
+    seen.add(key);
+    let v=String(h.val);
+    if(v.length>28) v=v.slice(0,28)+'…';
+    parts.push('<b>'+impEsc(h.label)+'</b> '+impEsc(v));
+  }
+  if(!parts.length) return '';
+  return '<div class="cust-hit">'+parts.join(' / ')+'</div>';
 }
 
 /* 今週の追客サマリー。
