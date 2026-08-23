@@ -383,6 +383,7 @@ body.readonly #import-btn{display:none!important;}
       <div class="sidebar-add">
         <button class="add-btn" id="new-btn">＋ 新規顧客を追加</button>
         <button class="imp-open-btn" id="import-btn" style="display:none;">📥 CSVから一括取込</button>
+        <button class="imp-open-btn" id="export-btn" style="display:none;">📤 CSVエクスポート</button>
       </div>
     </div>
     <div class="detail" id="detail">
@@ -647,6 +648,7 @@ async function loadCustomers(){
     // 以降の照合は担当者マスターの表記に合わせる
     if(myInfo&&myInfo.name){currentStaffName=myInfo.name;document.getElementById('user-name').textContent=myInfo.name;}
     document.getElementById('import-btn').style.display=(currentRole==='admin')?'block':'none';
+    document.getElementById('export-btn').style.display=(currentRole==='admin')?'block':'none';
     if(!canEdit()) document.body.classList.add('readonly');
     renderStaffFilterOptions();
     const items=await spGetItems('顧客リスト');
@@ -800,7 +802,8 @@ function searchMatchCustomer(c,tokens){
   return hits;
 }
 
-function renderList(){
+/* List filter/sort logic, shared by screen rendering (renderList) and CSV export. */
+function getFilteredCustomers(){
   const q=document.getElementById('search-input').value;
   const tokens=q.trim().split(/[\s\u3000]+/).filter(Boolean);
   const fr=document.getElementById('filter-rank').value;
@@ -860,6 +863,11 @@ function renderList(){
       });
     }
   }
+  return f;
+}
+
+function renderList(){
+  const f=getFilteredCustomers();
   renderWeekPanel(f);
   document.getElementById('list-count').textContent=f.length+'件';
   document.getElementById('customer-list').innerHTML=f.map(c=>{
@@ -1668,6 +1676,40 @@ function parseCSV(text){
   return rows.filter(r=>r.some(c=>c.trim()!==''));
 }
 
+// ===== CSVエクスポート =====
+function csvEsc(v){
+  v=(v===null||v===undefined)?'':String(v);
+  if(/[",\r\n]/.test(v)) v='"'+v.replace(/"/g,'""')+'"';
+  return v;
+}
+const EXPORT_HEADERS=['顧客ID','氏名','カナ','種別','ランク','担当者','電話番号','メールアドレス','住所','勤め先','年齢','年収(万円)','家族構成','共同氏名','共同勤め先','共同年齢','共同年収','反響時間','反響媒体','反響物件','メモ','案件','フェーズ','希望エリア','希望路線','希望駅','駅徒歩','希望土地面積','希望建物面積','予算(万円)','希望種別','購入時期','反響媒体(案件)','反響物件(案件)','反響日','契約日','希望条件メモ'];
+function exportCustomersCSV(){
+  const list=getFilteredCustomers();
+  const rows=[EXPORT_HEADERS];
+  for(const c of list){
+    const cases=(c.cases&&c.cases.length)?c.cases:[{}];
+    for(const x of cases){
+      rows.push([
+        c.id,c.name,c.kana,c.type,c.rank,c.staff,c.tel,c.email,c.address,c.company,c.age,c.income,c.family,
+        c.co_name,c.co_company,c.co_age,c.co_income,c.mediaDatetime,c.mediaSource,c.mediaPropName,c.memo,
+        x.label||'',x.phase||'',x.area||'',x.line||'',x.station||'',x.walk||'',x.landSize||'',x.buildSize||'',
+        x.budgetMan||x.budget||'',x.kind||'',x.timing||'',x.media||'',x.mediaProp||'',x.mediaDate||'',x.keiyakuDate||'',x.memo||''
+      ]);
+    }
+  }
+  const csv='﻿'+rows.map(r=>r.map(csvEsc).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const ts=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  a.href=url;
+  a.download=`顧客一覧_${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}.csv`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(list.length+'件を書き出しました');
+}
+
 function openImportModal(){
   importRows=[];importFileStats=[];
   document.getElementById('imp-file').value='';
@@ -1833,6 +1875,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
   renderPhaseFilterTags();
   document.getElementById('new-btn').addEventListener('click',newCustomer);
   document.getElementById('import-btn').addEventListener('click',openImportModal);
+  document.getElementById('export-btn').addEventListener('click',exportCustomersCSV);
   document.getElementById('import-cancel').addEventListener('click',closeImportModal);
   document.getElementById('imp-file').addEventListener('change',e=>handleImportFiles(e.target.files));
   document.getElementById('imp-dedup').addEventListener('change',()=>buildImportPreview());
