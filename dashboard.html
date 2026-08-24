@@ -1041,12 +1041,15 @@ function calcKPIPeriod(customers,cases,logs,staff,months){
   const reIds=reannaiLogIds(logs);
   const reannaiList=annaiList.filter(l=>reIds.has(l.ID));
 
-  // 契約：案件のフェーズ＋契約日。担当は案件ではなく顧客リストの担当者を見る。
+  // 契約：案件のフェーズ＋契約日。担当は案件に担当者が入っていればそちらを優先、
+  // 空なら顧客リストの担当者にフォールバック（同じ顧客の案件を別担当者に分けた場合に対応するため）。
   const myContracts=cases.filter(c=>{
     const custId=c['OData__x9867__x5ba2_ID'];
     const cust=customers.find(x=>String(x.ID)===custId);
     if(!cust)return false;
-    const isStaff=ownerIncluded(cust['OData__x62c5__x5f53__x8005_']||'',staff);
+    const caseOwner=(c['OData__x62c5__x5f53__x8005_']||'').trim();
+    const owner=caseOwner||cust['OData__x62c5__x5f53__x8005_']||'';
+    const isStaff=ownerIncluded(owner,staff);
     const phase=c['OData__x30d5__x30a7__x30fc__x30ba_']||'';
     return isStaff&&keiyakuPhases.includes(phase)&&inPeriod(keiyakuDate(c),months);
   });
@@ -1080,7 +1083,7 @@ const KPI_METRICS={
   reannai:{label:'再案内数',
     rule:'同じ案件で<b>2回目以降</b>の案内系活動。案件ごとに日付の古い順に並べ、2件目以降を数える。担当は<b>活動履歴の担当者</b>。'},
   keiyaku:{label:'契約数',
-    rule:'案件のフェーズが<b>契約済・融資承認・決済済</b>で、契約日（空なら案件の最終更新日）が期間内のもの。担当は<b>顧客リストの担当者</b>（案件側ではない）。'}
+    rule:'案件のフェーズが<b>契約済・融資承認・決済済</b>で、契約日（空なら案件の最終更新日）が期間内のもの。担当は<b>案件の担当者</b>（未設定の場合のみ顧客リストの担当者にフォールバック）。同じ顧客の案件を別担当者に分けている場合も、案件ごとにそれぞれの担当者でカウントされる。'}
 };
 
 function openKpiDetail(metric,staffIdx){
@@ -1131,16 +1134,18 @@ function openKpiDetail(metric,staffIdx){
         return [d10(x.date),rv.name,rv.link,x.owner||'',String(x.cid||''),String(x.logId||'')];
       });
   }else if(metric==='keiyaku'){
-    head=['契約日','顧客名','紐付け','案件','フェーズ','担当者（顧客）','顧客ID列の値','案件ID'];
+    head=['契約日','顧客名','紐付け','案件','フェーズ','担当者（案件優先／未設定なら顧客）','顧客ID列の値','案件ID'];
     rows=list.slice().sort((a,b)=>d10(keiyakuDate(b)).localeCompare(d10(keiyakuDate(a))))
       .map(cs=>{
         const key=String(cs['OData__x9867__x5ba2_ID']||'');
         const cu=custById.get(key);
         const link=cu?'OK':'⚠紐付け先なし'; if(!cu)orphan++;
+        const caseOwner=(cs['OData__x62c5__x5f53__x8005_']||'').trim();
+        const owner=caseOwner||(cu?(cu['OData__x62c5__x5f53__x8005_']||''):'');
         return [d10(keiyakuDate(cs)),nameOfCust(cu),link,
                 cs['OData__x6848__x4ef6__x30e9__x30d9__x30']||cs.Title||'',
                 cs['OData__x30d5__x30a7__x30fc__x30ba_']||'',
-                cu?(cu['OData__x62c5__x5f53__x8005_']||''):'',
+                owner,
                 key,String(cs.ID||'')];
       });
   }else{
