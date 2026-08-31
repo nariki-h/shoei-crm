@@ -616,6 +616,18 @@ function onSignedIn(){
 }
 
 // SharePoint
+// SharePointのREST APIのエラー応答はJSON({error:{message:{value:'...'}}})なので、
+// 生テキストのまま切り詰めると\uXXXXの生エスケープが残って読めなくなる。
+// 可能ならmessage.valueを取り出し、駄目なら生テキストにフォールバックする（各所のエラー表示で共用）。
+async function spErrorText(r,maxLen){
+  const t=await r.text();
+  let detail=t;
+  try{
+    const j=JSON.parse(t);
+    detail=(j&&j.error&&j.error.message&&j.error.message.value)||t;
+  }catch(_){/* JSONで無ければ生テキストのまま使う */}
+  return String(detail).slice(0,maxLen||300);
+}
 async function spGetItems(list,filter=''){
   const token=await getToken();
   // 1ページ2000件で取得し、__next を辿って全件取得（2000件超でも欠落しない）
@@ -623,7 +635,7 @@ async function spGetItems(list,filter=''){
   let results=[];
   while(url){
     const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
-    if(!r.ok){const t=await r.text();throw new Error(`${list} 取得エラー HTTP ${r.status}: ${t.slice(0,150)}`);}
+    if(!r.ok){const d=await spErrorText(r);throw new Error(`${list} 取得エラー HTTP ${r.status}: ${d}`);}
     const d=await r.json();
     results=results.concat(d.d?.results||[]);
     url=d.d?.__next||null;
@@ -1398,7 +1410,7 @@ async function spListFiles(folderPath){
   const url=`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${folderPath}')/Files`
            +`?$select=Name,ServerRelativeUrl,TimeLastModified&$top=500`;
   const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=nometadata'}});
-  if(!r.ok){const t=await r.text();throw new Error(`フォルダ取得 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  if(!r.ok){const d=await spErrorText(r);throw new Error(`フォルダ取得 HTTP ${r.status}: ${d}`);}
   const d=await r.json();
   return (d.value||[]).filter(f=>/\.xlsx$/i.test(f.Name)&&!f.Name.startsWith('~$'));
 }
@@ -1409,7 +1421,7 @@ async function spListFolders(folderPath){
   const url=`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${folderPath}')/Folders`
            +`?$select=Name,ServerRelativeUrl&$top=500`;
   const r=await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=nometadata'}});
-  if(!r.ok){const t=await r.text();throw new Error(`サブフォルダ取得 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  if(!r.ok){const d=await spErrorText(r);throw new Error(`サブフォルダ取得 HTTP ${r.status}: ${d}`);}
   const d=await r.json();
   return (d.value||[]).filter(f=>f.Name!=='Forms'&&!f.Name.startsWith('_vti'));
 }
@@ -1641,7 +1653,7 @@ async function spWriteRetry(url,body,isUpdate,tries){
     await new Promise(s=>setTimeout(s,wait));
     return spWriteRetry(url,body,isUpdate,tries+1);
   }
-  if(!r.ok){ const t=await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0,150)}`); }
+  if(!r.ok){ const d=await spErrorText(r); throw new Error(`HTTP ${r.status}: ${d}`); }
   return r;
 }
 
@@ -1701,7 +1713,7 @@ async function syncDenpyoToList(force,quiet){
       return;
     }
 
-    let ok=0,ng=0,lastErr='';
+    let ok=0,ng=0,lastErr='';const failDetails=[];
     for(let i=0;i<todo.length;i++){
       showLoading(`CRMへ同期中... (${i+1}/${todo.length})`);
       const t=todo[i];
@@ -1712,7 +1724,12 @@ async function syncDenpyoToList(force,quiet){
           : `${SITE_URL}/_api/web/lists/getbytitle('${DENPYO_LIST}')/items`;
         await spWriteRetry(url,body,!!t.id);
         ok++;
-      }catch(e){ ng++; lastErr=e.message; }
+      }catch(e){
+        ng++; lastErr=e.message;
+        // 失敗レコードごとに詳細を残す（トーストは最後の1件しか出せないため）。
+        failDetails.push(`№${denpyoKey(t.r)}：${e.message}`);
+        console.error('[CRM同期失敗]',denpyoKey(t.r),e);
+      }
     }
 
     // 索引にあるが伝票フォルダから消えた行は、CRM側の紐づけを壊さないよう削除しない
@@ -1720,8 +1737,12 @@ async function syncDenpyoToList(force,quiet){
     const orphan=idx.filter(i=>!live.has(String(i.Title||''))).length;
 
     if(ng===0) showToast(`CRM索引を更新しました（${ok}件）`);
-    else       showToast(`同期 ${ok}件成功 / ${ng}件失敗: ${lastErr}`,true);
+    else       showToast(`同期 ${ok}件成功 / ${ng}件失敗（詳細は「確認事項」欄）`,true);
+    // 前回の同期関連の警告は消してから今回分を積む（再実行するたびに積み上がらないように）
+    denpyoWarn=denpyoWarn.filter(w=>!w.startsWith('CRM同期失敗：')&&!w.startsWith('CRM索引に、伝票フォルダに存在しない行が'));
+    if(failDetails.length) denpyoWarn.push(...failDetails.map(d=>'CRM同期失敗：'+d));
     if(orphan>0) denpyoWarn.push(`CRM索引に、伝票フォルダに存在しない行が ${orphan}件あります（自動削除はしません）`);
+    renderUriage(); // 警告欄に反映する（トーストだけだと詳細が消えてしまうため）
   }catch(e){
     showToast('同期エラー: '+e.message,true);
   }finally{
@@ -2414,7 +2435,7 @@ async function spCreateItem(list,fields){
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose'},
     body:JSON.stringify(body)
   });
-  if(!r.ok){const t=await r.text(); throw new Error(`登録 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  if(!r.ok){const d=await spErrorText(r); throw new Error(`登録 HTTP ${r.status}: ${d}`);}
   return (await r.json()).d;
 }
 async function spAttachFile(list,itemId,fileName,buf){
@@ -2435,7 +2456,7 @@ async function spUpdateItem(list,id,fields){
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-HTTP-Method':'MERGE','IF-MATCH':'*'},
     body:JSON.stringify(body)
   });
-  if(!r.ok){const t=await r.text(); throw new Error(`更新 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  if(!r.ok){const d=await spErrorText(r); throw new Error(`更新 HTTP ${r.status}: ${d}`);}
 }
 async function spDeleteItem(list,id){
   const token=await getToken();
@@ -2443,7 +2464,7 @@ async function spDeleteItem(list,id){
     method:'POST',
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-HTTP-Method':'DELETE','IF-MATCH':'*'}
   });
-  if(!r.ok){const t=await r.text(); throw new Error(`削除 HTTP ${r.status}: ${t.slice(0,200)}`);}
+  if(!r.ok){const d=await spErrorText(r); throw new Error(`削除 HTTP ${r.status}: ${d}`);}
 }
 
 // --- 事業収支Excel → 結論数値・日付をラベル追跡で抽出 ---
