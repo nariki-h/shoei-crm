@@ -1928,7 +1928,7 @@ function computeStats(basis,months){
   const dispMap=new Map();
   if(targetData)Object.keys(targetData).forEach(n=>dispMap.set(normName(n),n));
   const disp=n=>dispMap.get(normName(n))||n;
-  const per=new Map(); let stockTotal=0,stockBucho=0;
+  const per=new Map(); let stockTotal=0,stockBucho=0,stockYotei=0;
   const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,yotei:0,yoteiCnt:0,doneList:[],yoteiList:[]});return per.get(k);};
   const isExcludedStock=name=>{
     // TARGET_EXCLUDED_STAFF もスペース差を吸収して判定
@@ -1948,9 +1948,11 @@ function computeStats(basis,months){
       if(!seen.has(key)){seen.add(key);o.cnt++;o.sou+=(l.row.honntai||l.row.sougaku||0);}
     });
     // 未入金だが予定日が期間内にあるレグ＝入金予定（実績には足さず別枠で保持）
+    // ストック分も同率で按分されているので、個人の予定とは別に部署ストックの入金見込みとして集計する。
     allNyukinPlanLegs(denpyoData).filter(l=>inPeriod(l.date,months)).forEach(l=>{
       const o=ensure(disp(l.row.staff)); o.yotei+=l.own; o.yoteiCnt++;
       o.yoteiList.push({p:bukkenName(l.row),d:l.date,a:l.own,t:`${l.side}${l.seq}`});
+      stockYotei+=l.stock;
     });
   } else {
   rows.forEach(r=>{
@@ -1974,7 +1976,7 @@ function computeStats(basis,months){
       }
     }
   });
-  return {per,stockTotal,stockBucho};
+  return {per,stockTotal,stockBucho,stockYotei};
 }
 // 部署合計＝全担当合計（ストック含む＝AP33合計＋仕入分）
 // 部署合計 内訳付き：{chukai, shiire, total} を返す。
@@ -1984,6 +1986,7 @@ function totalOfStats(stats){
   stats.per.forEach(o=>{chukai+=o.chukai;shiire+=o.shiire;yotei+=(o.yotei||0);
     doneList.push(...(o.doneList||[]));yoteiList.push(...(o.yoteiList||[]));});
   chukai+=stats.stockTotal;
+  yotei+=(stats.stockYotei||0); // 部署ストックの入金見込み分も部署合計の「入金予定」に含める
   return {chukai,shiire,yotei,doneList,yoteiList,total:chukai+shiire};
 }
 // チーム合計 内訳付き：{chukai, shiire, total}。ストックは含めない（部長ストックはチーム外）
