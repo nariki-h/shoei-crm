@@ -395,6 +395,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
        </select>
        <span style="font-size:11px;color:var(--text3);" id="uri-updated"></span>
        <button class="refresh-btn" onclick="loadDenpyo()">🔄 伝票を再読込</button>
+       <button class="refresh-btn" onclick="syncDenpyoToList(true)">🔁 CRMへ再同期</button>
      </div>
 
      <div id="uri-warn-box"></div>
@@ -1435,7 +1436,7 @@ async function spDownloadFile(serverRelativeUrl){
 }
 
 // 契約伝票1ファイルをパース（固定セル座標）
-function parseDenpyo(buf,fileName,updated,folder){
+function parseDenpyo(buf,fileName,updated,folder,fileUrl){
   const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:true});
   const ws=wb.Sheets['契約伝票'];
   if(!ws) return null;
@@ -1503,7 +1504,7 @@ function parseDenpyo(buf,fileName,updated,folder){
     .filter(c=>c.role==='課長' && c.name)
     .map(c=>({name:resolveStaff(c.name), rate:c.rate, amount:c.amount}));
   return {
-    no:v('AW2'), fileName, updated, folder:folder||'',
+    no:v('AW2'), fileName, updated, folder:folder||'', url:fileUrl||'',
     keiyakuDate:d('I3'), hikiwatashiDate:d('T3'), kessaiDate:d('AE3'),
     seiName:sei, staff:resolveStaff(sei),
     kacho:kachoList.map(k=>k.name).join(' / '),  // 表示用の課長名（複数時はスラッシュ区切り）
@@ -1542,7 +1543,7 @@ async function loadDenpyo(){
       showLoading(`契約伝票を読み込み中... (${i+1}/${files.length})`);
       try{
         const buf=await spDownloadFile(f.ServerRelativeUrl);
-        const rec=parseDenpyo(buf,f.Name,f.TimeLastModified,f.folder);
+        const rec=parseDenpyo(buf,f.Name,f.TimeLastModified,f.folder,f.ServerRelativeUrl);
         if(rec) recs.push(rec);
         else denpyoWarn.push(`${f.folder}/${f.Name}：「契約伝票」シートが見つかりません`);
       }catch(e){ denpyoWarn.push(`${f.folder}/${f.Name}：${e.message}`); }
@@ -1574,6 +1575,7 @@ async function loadDenpyo(){
       +`　最終読込 ${new Date().toLocaleTimeString('ja-JP')}`;
     renderUriage();
     showToast(`契約伝票 ${denpyoData.length}件を読み込みました`);
+    await autoSyncDenpyo();
   }catch(e){
     denpyoData=denpyoData||[];
     denpyoWarn.push('読み込みエラー: '+e.message);
@@ -1581,6 +1583,160 @@ async function loadDenpyo(){
     showToast('エラー: '+e.message,true);
   }
   hideLoading();
+}
+
+
+// ===================================================================
+// 契約伝票 →「契約伝票リスト」への差分同期（CRMから参照するための索引）
+// -------------------------------------------------------------------
+// ・伝票のパースは loadDenpyo() が済ませているので、ここはその結果を書くだけ。
+// ・毎回全件書くと「人数 × 伝票件数」の無駄な書き込みになりスロットリング(429)を
+//   招くため、索引に無いものと、ファイル更新日時が変わったものだけを書く。
+// ・CaseId / CustomerId はCRM側が紐づけで書く列なので、同期では絶対に触らない。
+// ・歩合(D/T/AJ)と部署ストック(AZ)は索引に持たせない（CRMは全員が開くため）。
+// ===================================================================
+const DENPYO_LIST='契約伝票リスト';
+// 自動同期を走らせる役職。これ以外の人が開いても読むだけで何も書かない。
+// （手動の「CRMへ再同期」ボタンは押せる。最終的な可否はSharePointの権限が決める）
+const SYNC_ROLES=new Set(['admin','manager','管理者','部長','課長']);
+let denpyoSyncBusy=false;
+let denpyoTypeName=null;
+let myRoleCache=null;
+
+// リストのエンティティ型名。書き込みのたびに取りに行かないようキャッシュする。
+async function denpyoListType(){
+  if(denpyoTypeName) return denpyoTypeName;
+  const token=await getToken();
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${DENPYO_LIST}')?$select=ListItemEntityTypeFullName`,
+    {headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  if(!r.ok) throw new Error(`「${DENPYO_LIST}」が見つかりません (HTTP ${r.status})`);
+  denpyoTypeName=(await r.json()).d.ListItemEntityTypeFullName;
+  return denpyoTypeName;
+}
+
+// ログイン中のユーザーの役職を担当者マスターから引く（スペース差は normName で吸収）
+async function myDenpyoRole(){
+  if(myRoleCache!==null) return myRoleCache;
+  myRoleCache='';
+  try{
+    const items=await spGetItems('担当者マスター');
+    const me=normName(currentUser&&currentUser.name||'');
+    const hit=items.find(x=>normName(x.Title)===me);
+    if(hit) myRoleCache=String(staffRoleOf(hit)||'').toLowerCase();
+  }catch(e){ /* 引けなければ空のまま＝自動同期しない */ }
+  return myRoleCache;
+}
+
+// 書き込み1回。429（混雑）が返ったら Retry-After 秒だけ待って自動リトライする。
+async function spWriteRetry(url,body,isUpdate,tries){
+  tries=tries||0;
+  const token=await getToken();
+  const h={'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose',
+           'Content-Type':'application/json;odata=verbose'};
+  if(isUpdate){ h['X-HTTP-Method']='MERGE'; h['IF-MATCH']='*'; }
+  const r=await fetch(url,{method:'POST',headers:h,body:JSON.stringify(body)});
+  if(r.status===429||r.status===503){
+    if(tries>=4) throw new Error('混雑が続くため中断しました（429）');
+    const wait=(Number(r.headers.get('Retry-After'))||(5*(tries+1)))*1000;
+    await new Promise(s=>setTimeout(s,wait));
+    return spWriteRetry(url,body,isUpdate,tries+1);
+  }
+  if(!r.ok){ const t=await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0,150)}`); }
+  return r;
+}
+
+// 索引の鍵は伝票№(AW2)。未記入の伝票はファイル名で単独扱い（loadDenpyoの重複排除と同じ規則）。
+const denpyoKey=r=>String(r.no||('【未記入】'+r.fileName));
+const dTxt=v=>String(v==null?'':v).slice(0,255);
+
+function denpyoFields(r){
+  return {
+    Title:dTxt(denpyoKey(r)),
+    KeiyakuDate:r.keiyakuDate||null,
+    HikiwatashiDate:r.hikiwatashiDate||null,
+    KessaiDate:r.kessaiDate||null,
+    Tantosha:dTxt(r.staff),
+    Urinushi:dTxt(r.urinushi),
+    Kainushi:dTxt(r.kainushi),
+    BukkenType:dTxt(r.bukkenType),
+    Shozai:dTxt(r.shozai),
+    Jukyo:dTxt(r.jukyo),
+    Honntai:r.honntai||0,
+    Sougaku:r.sougaku||0,
+    Uriage:r.uriage||0,
+    NyukinJson:JSON.stringify(r.nyukin||[]),
+    LoanBank:dTxt(r.loanBank),
+    ShouninDate:r.shouninDate||null,
+    HankyoDate:r.hankyoDate||null,
+    HankyoBaitai:dTxt(r.hankyoBaitai),
+    HankyoBukken:dTxt(r.hankyoBukken),
+    FileName:dTxt(r.fileName),
+    FileUrl:String(r.url||''),
+    FileUpdated:r.updated||null
+  };
+}
+
+// force=true で全件強制上書き（手動ボタン用）。quiet=true で差分ゼロ時に何も出さない。
+async function syncDenpyoToList(force,quiet){
+  if(!denpyoData||!denpyoData.length){ showToast('先に伝票を読み込んでください',true); return; }
+  if(denpyoSyncBusy) return;
+  denpyoSyncBusy=true;
+  try{
+    const type=await denpyoListType();
+    const idx=await spGetItems(DENPYO_LIST);
+    const byKey=new Map(idx.map(i=>[String(i.Title||''),i]));
+
+    const todo=[];
+    denpyoData.forEach(r=>{
+      const cur=byKey.get(denpyoKey(r));
+      if(!cur){ todo.push({r:r,id:null}); return; }
+      // 更新日時が一致していれば中身も同じとみなして書かない（無駄な上書きを防ぐ）
+      const same=cur.FileUpdated&&r.updated&&
+                 Math.abs(new Date(cur.FileUpdated)-new Date(r.updated))<2000;
+      if(force||!same) todo.push({r:r,id:cur.ID});
+    });
+
+    if(!todo.length){
+      if(!quiet) showToast('CRM索引は最新です（差分なし）');
+      return;
+    }
+
+    let ok=0,ng=0,lastErr='';
+    for(let i=0;i<todo.length;i++){
+      showLoading(`CRMへ同期中... (${i+1}/${todo.length})`);
+      const t=todo[i];
+      try{
+        const body=Object.assign({'__metadata':{'type':type}},denpyoFields(t.r));
+        const url=t.id
+          ? `${SITE_URL}/_api/web/lists/getbytitle('${DENPYO_LIST}')/items(${t.id})`
+          : `${SITE_URL}/_api/web/lists/getbytitle('${DENPYO_LIST}')/items`;
+        await spWriteRetry(url,body,!!t.id);
+        ok++;
+      }catch(e){ ng++; lastErr=e.message; }
+    }
+
+    // 索引にあるが伝票フォルダから消えた行は、CRM側の紐づけを壊さないよう削除しない
+    const live=new Set(denpyoData.map(denpyoKey));
+    const orphan=idx.filter(i=>!live.has(String(i.Title||''))).length;
+
+    if(ng===0) showToast(`CRM索引を更新しました（${ok}件）`);
+    else       showToast(`同期 ${ok}件成功 / ${ng}件失敗: ${lastErr}`,true);
+    if(orphan>0) denpyoWarn.push(`CRM索引に、伝票フォルダに存在しない行が ${orphan}件あります（自動削除はしません）`);
+  }catch(e){
+    showToast('同期エラー: '+e.message,true);
+  }finally{
+    denpyoSyncBusy=false;
+    hideLoading();
+  }
+}
+
+// 伝票読み込み直後に呼ばれる。admin/manager のときだけ差分を書く。
+async function autoSyncDenpyo(){
+  try{
+    const role=await myDenpyoRole();
+    if(!SYNC_ROLES.has(role)) return;      // 一般メンバー・事務・閲覧は読むだけ
+    await syncDenpyoToList(false,true);
+  }catch(e){ console.warn('CRM索引の自動同期をスキップしました:',e.message); }
 }
 
 // ===== 入金基準の共通ヘルパー =====
