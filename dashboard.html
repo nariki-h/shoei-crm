@@ -1454,9 +1454,17 @@ function parseDenpyo(buf,fileName,updated,folder,fileUrl){
   if(!ws) return null;
   const v=a=>(ws[a]&&ws[a].v!==undefined&&ws[a].v!=='')?ws[a].v:null;
   const n=a=>{const x=v(a);return typeof x==='number'?x:(x?Number(String(x).replace(/,/g,''))||0:0);};
-  const d=a=>{const x=v(a);
+  // 日付セルがExcelの日付型でなく手入力の文字列だと（例：年の無い「5/28」や余分な文字混じり）、
+  // そのままSharePointへ送るとCRM同期時に「プリミティブ型の値を必要な型'Edm.DateTime'に変換できません」
+  // というエラーになる。年月日として読める形でなければ未入力扱いにし、dBadに積んで警告に回す。
+  const dBad=[];
+  const d=(a,label)=>{const x=v(a);
     if(x instanceof Date){const p=k=>String(k).padStart(2,'0');return `${x.getFullYear()}-${p(x.getMonth()+1)}-${p(x.getDate())}`;}
-    return x?String(x).slice(0,10):'';};
+    if(!x) return '';
+    const s=String(x).trim().slice(0,10);
+    if(!/^\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}/.test(s)){ dBad.push(`${label||a}「${s}」`); return ''; }
+    return s.replace(/[\/.]/g,'-');
+  };
 
   // 物件種別：チェックボックス(TRUE)の隣のラベルを採用
   const TYPE_CELLS=[['I5','K5'],['I6','K6'],['U5','W5'],['U6','W6'],
@@ -1517,7 +1525,7 @@ function parseDenpyo(buf,fileName,updated,folder,fileUrl){
     .map(c=>({name:resolveStaff(c.name), rate:c.rate, amount:c.amount}));
   return {
     no:v('AW2'), fileName, updated, folder:folder||'', url:fileUrl||'',
-    keiyakuDate:d('I3'), hikiwatashiDate:d('T3'), kessaiDate:d('AE3'),
+    keiyakuDate:d('I3','契約日'), hikiwatashiDate:d('T3','引渡日'), kessaiDate:d('AE3','決済日'),
     seiName:sei, staff:resolveStaff(sei),
     kacho:kachoList.map(k=>k.name).join(' / '),  // 表示用の課長名（複数時はスラッシュ区切り）
     kachoList,                                    // 集計用：課長ごとの割合・金額
@@ -1527,11 +1535,11 @@ function parseDenpyo(buf,fileName,updated,folder,fileUrl){
     urinushi:v('I14')||'', kainushi:v('I16')||'',
     honntai:n('O21'), sougaku:n('O23'),
     feeZei:n('AN31'), feeIn:n('AN32'), uriage:n('AP33'), stock,
-    nyukin, nyukinTotal, nyukinDone, nyukinBad,
+    nyukin, nyukinTotal, nyukinDone, nyukinBad, dateBad:dBad,
     commission,
     loanBank:v('Q41')||'', loanAmount:n('AT41'),
-    shouninDate:d('I42'), kaijoDate:d('W42'),
-    hankyoDate:d('AB43'), hankyoBaitai:v('AT43')||'',
+    shouninDate:d('I42','承認日'), kaijoDate:d('W42','解除日'),
+    hankyoDate:d('AB43','反響日'), hankyoBaitai:v('AT43')||'',
     hankyoBukken:[v('AB44'),v('AG44'),v('AL44')].filter(Boolean).join(' '),
     hankyoPrice:n('AT44'),
   };
@@ -1577,6 +1585,9 @@ async function loadDenpyo(){
     [...byNo.values()].forEach(r=>{
       if(r.nyukinBad&&r.nyukinBad.length)
         denpyoWarn.push(`№${r.no||'—'}：入金日の年が読めません（${r.nyukinBad.join('／')}）→ 日付形式で入力してください`);
+      // 契約日・決済日等が日付形式で読めないと、CRM同期時にSharePoint側でエラーになる（未入力扱いで通す）
+      if(r.dateBad&&r.dateBad.length)
+        denpyoWarn.push(`№${r.no||'—'}：日付として読めない項目があります（${r.dateBad.join('／')}）→ Excel側で日付形式に修正してください（同期は未入力扱いで通しています）`);
     });
 
     denpyoData=[...byNo.values()].sort((a,b)=>(b.keiyakuDate||'').localeCompare(a.keiyakuDate||''));
