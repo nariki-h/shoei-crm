@@ -2553,6 +2553,13 @@ function shiireProfit(it){
   return {cost,mikomi,actual,kakutei,settled};
 }
 
+// 現時点で一番確からしい粗利＝実売価格が判明していればそれを優先（決済済みかどうかは問わない）、
+// 未判明なら仕入契約時の見込み（販売予定額ベース）を使う。
+function shiireBestProfit(it){
+  const p=shiireProfit(it);
+  return p.kakutei!=null?{value:p.kakutei,basis:'actual'}:{value:p.mikomi,basis:'plan'};
+}
+
 // --- 一覧読み込み・描画 ---
 async function loadShiire(){
   showLoading('仕入物件を読み込み中...');
@@ -2580,6 +2587,10 @@ function renderShiire(){
   // ① 仕入契約ベース：件数＋見込み粗利の計上
   const buyRows=all.filter(inBuy);
   const mikomiSum=buyRows.reduce((s,it)=>s+shiireProfit(it).mikomi,0);
+  // ①' 仕入契約ベース：同じ対象を「実売価格が判明していればそれ優先」で見た最新の粗利見込み
+  const bestList=buyRows.map(it=>shiireBestProfit(it));
+  const bestSum=bestList.reduce((s,b)=>s+b.value,0);
+  const bestActualCnt=bestList.filter(b=>b.basis==='actual').length;
   // ② 販売決済ベース：件数＋確定粗利＋見込み→確定の差異
   const sellRows=all.filter(inSell);
   let kakuteiSum=0,diffSum=0,diffCnt=0;
@@ -2649,7 +2660,8 @@ function renderShiire(){
      <td style="font-weight:700;color:${shownDiff<0?'#dc2626':'#15803d'};">${shownDiff>=0?'+':''}${yen(shownDiff).replace('¥-','−¥')}</td>
      <td></td></tr>`:'';
   document.getElementById('shiire-cards').innerHTML=`
-    <div class="uri-card"><div class="lb">見込み粗利 計上（仕入契約）</div><div class="vl">${yen(mikomiSum)}</div><div class="lb" style="margin-top:2px;">仕入契約 ${buyRows.length}件</div></div>
+    <div class="uri-card"><div class="lb">見込み粗利 計上（仕入契約）</div><div class="vl">${yen(mikomiSum)}</div><div class="lb" style="margin-top:2px;">仕入契約 ${buyRows.length}件（販売予定額ベース）</div></div>
+    <div class="uri-card"><div class="lb">最新の見込み粗利（実売優先）</div><div class="vl">${yen(bestSum)}</div><div class="lb" style="margin-top:2px;">仕入契約 ${buyRows.length}件（うち実売価格判明 ${bestActualCnt}件）</div></div>
     <div class="uri-card"><div class="lb">確定粗利（販売決済）</div><div class="vl">${yen(kakuteiSum)}</div><div class="lb" style="margin-top:2px;">販売決済 ${sellRows.length}件</div></div>
     <div class="uri-card"><div class="lb">見込み→確定 差異</div><div class="vl" style="color:${diffCnt===0?'var(--text3)':diffSum<0?'#dc2626':'#15803d'};">${diffCnt===0?'—':(diffSum>=0?'+':'')+yen(diffSum).replace('¥-','−¥')}</div><div class="lb" style="margin-top:2px;">${diffCnt===0?'期間内の決済なし':`期間内決済 ${diffCnt}件分`}</div></div>
     <div class="uri-card"><div class="lb">保有中の見込み粗利</div><div class="vl">${yen(holdingMikomi)}</div><div class="lb" style="margin-top:2px;">未決済 ${holding.length}件（全期間）</div></div>`;
