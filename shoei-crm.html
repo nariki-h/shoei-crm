@@ -110,6 +110,8 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .sidebar-filters{padding:0 12px 8px;display:flex;gap:6px;flex-wrap:wrap;}
 .sidebar-filters .selector-trigger{font-size:12px;padding:6px 8px;}
 .sidebar-filters select{flex:1;font-size:11px;padding:5px 4px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);outline:none;}
+.sidebar-filters input[type=date]{flex:1;min-width:0;font-size:11px;padding:5px 4px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);outline:none;}
+.sidebar-filters .date-label{font-size:11px;color:var(--text-muted);align-self:center;white-space:nowrap;}
 .sidebar-list{flex:1;overflow-y:auto;}
 .sidebar-count{padding:6px 12px;font-size:11px;color:var(--text-muted);}
 .cust-item{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;}
@@ -376,6 +378,13 @@ body.readonly #import-btn{display:none!important;}
           <option value="rank">ランク高い順</option>
           <option value="touch_old">最終接触が古い順（追客リスト）</option>
         </select>
+      </div>
+      <div class="sidebar-filters">
+        <span class="date-label">反響日</span>
+        <input type="date" id="filter-date-from" title="反響日（開始）"/>
+        <span class="date-label">〜</span>
+        <input type="date" id="filter-date-to" title="反響日（終了）"/>
+        <button class="selector-trigger" id="filter-date-clear" title="期間指定を解除" style="flex:0 0 auto;">×</button>
       </div>
       <div class="week-panel" id="week-panel" style="display:none;"></div>
       <div class="sidebar-count" id="list-count">--</div>
@@ -815,8 +824,15 @@ function getFilteredCustomers(){
     currentRole==='manager'?Object.keys(window.STAFF_MAP||{}).filter(n=>(window.STAFF_MAP[n].team===currentTeam)):
     [normName(currentStaffName)]);
   // フェーズ複数選択（全選択または未選択のときは絞り込みなし）
-  const usePhase=selectedPhases.size>0 && selectedPhases.size<PHASES.length;
+  // 検索キーワードが入力されているときは、探している顧客がフェーズ絞り込み（完了系フェーズの除外など）で
+  // 見えなくなることのないよう、フェーズ絞り込みを一時的に無視する。
+  const usePhase=selectedPhases.size>0 && selectedPhases.size<PHASES.length && tokens.length===0;
   const ws0=weekStart();
+  // 反響日の期間検索
+  const dFrom=document.getElementById('filter-date-from')?.value||'';
+  const dTo=document.getElementById('filter-date-to')?.value||'';
+  const dFromT=dFrom?new Date(dFrom+'T00:00:00').getTime():null;
+  const dToT=dTo?new Date(dTo+'T23:59:59').getTime():null;
   const f=customers.filter(c=>{
     if(untouchedOnly){
       if(c.rank!=='S'&&c.rank!=='A') return false;
@@ -832,6 +848,12 @@ function getFilteredCustomers(){
       c._searchHits=hits;   // 一覧カードに「どこで当たったか」を出すため保持
     }else{
       c._searchHits=null;
+    }
+    if(dFromT!==null||dToT!==null){
+      const mt=c.mediaDatetime?new Date(c.mediaDatetime).getTime():NaN;
+      if(isNaN(mt)) return false;
+      if(dFromT!==null&&mt<dFromT) return false;
+      if(dToT!==null&&mt>dToT) return false;
     }
     if(usePhase&&!c.cases.some(x=>selectedPhases.has(x.phase))) return false;
     if(fr&&c.rank!==fr) return false;
@@ -1891,6 +1913,13 @@ document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('filter-rank').addEventListener('change',renderList);
   document.getElementById('filter-staff').addEventListener('change',renderList);
   document.getElementById('sort-select').addEventListener('change',renderList);
+  document.getElementById('filter-date-from').addEventListener('change',renderList);
+  document.getElementById('filter-date-to').addEventListener('change',renderList);
+  document.getElementById('filter-date-clear').addEventListener('click',()=>{
+    document.getElementById('filter-date-from').value='';
+    document.getElementById('filter-date-to').value='';
+    renderList();
+  });
   renderPhaseFilterTags();
   document.getElementById('new-btn').addEventListener('click',newCustomer);
   document.getElementById('import-btn').addEventListener('click',openImportModal);
