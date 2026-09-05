@@ -600,6 +600,16 @@ async function getListType(list,token){
 function assertEditable(){
   if(!canEdit()){ showToast('閲覧専用のアカウントのため変更できません',true); throw new Error('read-only'); }
 }
+// SharePointのREST APIはHTTPエラー時もfetch自体は例外を投げないため、
+// ステータスを見て明示的にthrowする（でないと保存失敗が画面上どこにも出ず、
+// 「保存しました」と表示されたのに実は反映されていない、という事態になる）。
+async function spCheckOk(r,list,id){
+  if(r.ok) return;
+  let detail='';
+  try{ const j=await r.json(); detail=j?.['odata.error']?.message?.value||JSON.stringify(j); }catch(e){ try{ detail=await r.text(); }catch(e2){} }
+  throw new Error(`${list}${id!=null?'('+id+')':''}への保存に失敗しました (HTTP ${r.status}) ${detail}`.trim());
+}
+
 async function spAdd(list,body){
   assertEditable();
   const token=await getToken();
@@ -610,6 +620,7 @@ async function spAdd(list,body){
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token)},
     body:JSON.stringify(body)
   });
+  if(!r.ok) await spCheckOk(r,list);
   return r.json();
 }
 
@@ -618,11 +629,12 @@ async function spUpdate(list,id,body){
   const token=await getToken();
   const type=await getListType(list,token);
   body.__metadata={type};
-  await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${id})`,{
+  const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('${list}')/items(${id})`,{
     method:'POST',
     headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':await getDigest(token),'IF-MATCH':'*','X-HTTP-Method':'MERGE'},
     body:JSON.stringify(body)
   });
+  if(!r.ok) await spCheckOk(r,list,id);
 }
 
 async function loadStaff(){
@@ -1024,7 +1036,7 @@ function renderDetail(){
       </div>
       <div class="phase-row">
         <span class="phase-label-sm">担当者</span>
-        <select onchange="csf('staff',this.value)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);">
+        <select id="case-staff-select" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);">
           <option value="">未設定</option>
           ${(window.SALES_LIST||[]).map(s=>`<option${normName(cs.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}
         </select>
@@ -1046,7 +1058,7 @@ function renderDetail(){
           <div class="field-item"><span class="fl">カナ</span><div class="fv"><input value="${c.kana}" onchange="cf(${c.id},'kana',this.value)"/></div></div>
           <div class="field-item"><span class="fl">種別</span><div class="fv"><select onchange="cf(${c.id},'type',this.value)"><option${c.type==='個人'?' selected':''}>個人</option><option${c.type==='法人'?' selected':''}>法人</option></select></div></div>
           <div class="field-item"><span class="fl">ランク</span><div class="fv"><select onchange="cf(${c.id},'rank',this.value)">${RANKS.map(r=>`<option${c.rank===r?' selected':''}>${r}</option>`).join('')}</select></div></div>
-          <div class="field-item"><span class="fl">担当者</span><div class="fv"><select onchange="cf(${c.id},'staff',this.value)"><option value="">未設定</option>${(window.SALES_LIST||[]).map(s=>`<option${normName(c.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}</select></div></div>
+          <div class="field-item"><span class="fl">担当者</span><div class="fv"><select id="cust-staff-select"><option value="">未設定</option>${(window.SALES_LIST||[]).map(s=>`<option${normName(c.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}</select></div></div>
           <div class="field-item"><span class="fl">電話番号</span><div class="fv"><input value="${c.tel}" onchange="cf(${c.id},'tel',this.value)" oninput="this.value=this.value.replace(/[^0-9\-]/g,'')" placeholder="例：090-1234-5678"/></div></div>
           <div class="field-item"><span class="fl">メール</span><div class="fv"><input value="${c.email}" onchange="cf(${c.id},'email',this.value)"/></div></div>
           <div class="field-item full"><span class="fl">住所</span><div class="fv"><input value="${c.address}" onchange="cf(${c.id},'address',this.value)"/></div></div>
@@ -1178,6 +1190,13 @@ function renderDetail(){
     </div>`;
 
   document.getElementById('phase-grid').innerHTML=PHASES.map(p=>`<div class="phase-opt${p===cs.phase?' selected':''}" onclick="setPhase('${p}')">${p}</div>`).join('');
+
+  // 担当者セレクトはinline onchange属性だと環境によって変更イベントが拾えないことがあるため、
+  // 描画のたびに明示的にaddEventListenerで配線し直す（フェーズ下＝案件担当／申込人情報内＝顧客担当）。
+  const caseStaffSel=document.getElementById('case-staff-select');
+  if(caseStaffSel) caseStaffSel.addEventListener('change',function(){csf('staff',this.value);});
+  const custStaffSel=document.getElementById('cust-staff-select');
+  if(custStaffSel) custStaffSel.addEventListener('change',function(){cf(c.id,'staff',this.value);});
 }
 
 function cf(id,k,v){const c=customers.find(x=>x.id===id);if(c)c[k]=v;}
@@ -1365,13 +1384,17 @@ async function saveCustomer(){
     }
     // 案件ごとの担当者。案件リストに「担当者」列が未作成の環境でも
     // 通常の案件保存自体は失敗させたくないので、あえて別リクエスト・別try/catchにしている（DupFlagと同じ考え方）。
+    // ただし失敗を完全に握りつぶすと「保存した気になっているのに反映されていない」に気づけないため、
+    // 画面上にも警告を出す（保存自体は続行する）。
+    const warnings=[];
     try{
       for(const cs of c.cases){
         if(!cs.id) continue;
         await spUpdate('案件リスト',cs.id,{'OData__x62c5__x5f53__x8005_':cs.staff||null});
       }
     }catch(e){
-      console.warn('案件の担当者列の更新をスキップしました（案件リストに「担当者」列が未作成の可能性）:',e.message);
+      console.warn('案件の担当者列の更新に失敗しました:',e.message);
+      warnings.push(`⚠ 案件の担当者の保存に失敗しました: ${e.message}`);
     }
     // 重複疑いチェック。DupFlag/DupCandidates列が未作成の環境でも
     // 通常の保存自体は失敗させたくないので、あえて別リクエスト・別try/catchにしている。
@@ -1382,10 +1405,10 @@ async function saveCustomer(){
       c.dupFlag=ids.length>0; c.dupCandidateIds=ids;
       if(phoneMatch) dupToast=`⚠ 電話番号が「${phoneMatch.name}」さんと一致します。重複の可能性があります`;
     }catch(e){
-      console.warn('重複チェック列の更新をスキップしました（DupFlag/DupCandidates列が未作成の可能性）:',e.message);
+      console.warn('重複チェック列の更新に失敗しました:',e.message);
     }
     renderList();renderDetail();
-    showToast(dupToast||'保存しました',!!dupToast);
+    showToast(warnings[0]||dupToast||'保存しました',!!(warnings.length||dupToast));
   }catch(e){showToast('保存エラー: '+e.message,true);}
   hideLoading();
 }
