@@ -1031,11 +1031,24 @@ function renderDetail(){
         <button class="dup-clear-btn" onclick="clearDupFlag(${c.id})">疑いを解除（統合しない）</button>
       </div>`:''}
       <div class="phase-row">
+        <span class="phase-label-sm">顧客担当者</span>
+        <select id="cust-staff-select" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);">
+          <option value="">未設定</option>
+          ${(window.SALES_LIST||[]).map(s=>`<option${normName(c.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="det-tabs">
+      ${c.cases.map((x,i)=>`<button class="tab-btn${i===selectedCaseIdx?' active':''}" onclick="switchCase(${i})">${x.label}</button>`).join('')}
+      <button class="tab-add" onclick="addCase()">＋</button>
+    </div>
+    <div class="det-head" style="border-top:1px solid var(--border);">
+      <div class="phase-row" style="margin-bottom:8px;">
         <span class="phase-label-sm">フェーズ</span>
         <div class="phase-badge" onclick="openModal()">${cs.phase} ▾</div>
       </div>
-      <div class="phase-row">
-        <span class="phase-label-sm">担当者</span>
+      <div class="phase-row" style="margin-bottom:8px;">
+        <span class="phase-label-sm">案件担当者</span>
         <select id="case-staff-select" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);">
           <option value="">未設定</option>
           ${(window.SALES_LIST||[]).map(s=>`<option${normName(cs.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}
@@ -1046,10 +1059,6 @@ function renderDetail(){
         <input type="date" value="${cs.keiyakuDate||''}" onchange="csf('keiyakuDate',this.value)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);"/>
       </div>
     </div>
-    <div class="det-tabs">
-      ${c.cases.map((x,i)=>`<button class="tab-btn${i===selectedCaseIdx?' active':''}" onclick="switchCase(${i})">${x.label}</button>`).join('')}
-      <button class="tab-add" onclick="addCase()">＋</button>
-    </div>
     <div class="det-body">
       <div class="sec-card">
         <div class="sec-title">申込人情報</div>
@@ -1058,7 +1067,6 @@ function renderDetail(){
           <div class="field-item"><span class="fl">カナ</span><div class="fv"><input value="${c.kana}" onchange="cf(${c.id},'kana',this.value)"/></div></div>
           <div class="field-item"><span class="fl">種別</span><div class="fv"><select onchange="cf(${c.id},'type',this.value)"><option${c.type==='個人'?' selected':''}>個人</option><option${c.type==='法人'?' selected':''}>法人</option></select></div></div>
           <div class="field-item"><span class="fl">ランク</span><div class="fv"><select onchange="cf(${c.id},'rank',this.value)">${RANKS.map(r=>`<option${c.rank===r?' selected':''}>${r}</option>`).join('')}</select></div></div>
-          <div class="field-item"><span class="fl">担当者</span><div class="fv"><select id="cust-staff-select"><option value="">未設定</option>${(window.SALES_LIST||[]).map(s=>`<option${normName(c.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}</select></div></div>
           <div class="field-item"><span class="fl">電話番号</span><div class="fv"><input value="${c.tel}" onchange="cf(${c.id},'tel',this.value)" oninput="this.value=this.value.replace(/[^0-9\-]/g,'')" placeholder="例：090-1234-5678"/></div></div>
           <div class="field-item"><span class="fl">メール</span><div class="fv"><input value="${c.email}" onchange="cf(${c.id},'email',this.value)"/></div></div>
           <div class="field-item full"><span class="fl">住所</span><div class="fv"><input value="${c.address}" onchange="cf(${c.id},'address',this.value)"/></div></div>
@@ -1192,14 +1200,24 @@ function renderDetail(){
   document.getElementById('phase-grid').innerHTML=PHASES.map(p=>`<div class="phase-opt${p===cs.phase?' selected':''}" onclick="setPhase('${p}')">${p}</div>`).join('');
 
   // 担当者セレクトはinline onchange属性だと環境によって変更イベントが拾えないことがあるため、
-  // 描画のたびに明示的にaddEventListenerで配線し直す（フェーズ下＝案件担当／申込人情報内＝顧客担当）。
+  // 描画のたびに明示的にaddEventListenerで配線し直す（ヘッダー＝顧客担当／タブ下＝案件担当）。
   const caseStaffSel=document.getElementById('case-staff-select');
   if(caseStaffSel) caseStaffSel.addEventListener('change',function(){csf('staff',this.value);});
   const custStaffSel=document.getElementById('cust-staff-select');
-  if(custStaffSel) custStaffSel.addEventListener('change',function(){cf(c.id,'staff',this.value);});
+  // 顧客担当者を変更すると、その顧客の全案件の案件担当者も基本は自動で追随させる
+  // （成木が全体の窓口で、実務は馬場・金光などに振り分ける運用のため）。
+  // 個別の案件だけ担当を分けたい場合は、この後で案件担当者の方を手動で選び直せばよい。
+  if(custStaffSel) custStaffSel.addEventListener('change',function(){cf(c.id,'staff',this.value);renderDetail();renderList();});
 }
 
-function cf(id,k,v){const c=customers.find(x=>x.id===id);if(c)c[k]=v;}
+function cf(id,k,v){
+  const c=customers.find(x=>x.id===id);
+  if(!c) return;
+  c[k]=v;
+  // 顧客担当者を変えたら、基本は全案件の案件担当者も同じ人に揃える運用にする
+  // （手分けしたい案件だけ、この後で案件担当者を個別に手動変更する）。
+  if(k==='staff') (c.cases||[]).forEach(cs=>{cs.staff=v;});
+}
 // 反響日時: 保存文字列 <-> datetime-local入力値 の相互変換（列はテキストなので保存は「YYYY/MM/DD HH:mm」で統一）
 function toDTLocal(s){if(!s)return '';const d=new Date(s);if(isNaN(d))return '';const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;}
 function fromDTLocal(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return v;const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;}
