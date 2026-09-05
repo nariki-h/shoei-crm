@@ -2160,7 +2160,9 @@ function computeStats(basis,months){
       }
     } else {
       if(it.BuyKeiyakuDate&&inPeriod(it.BuyKeiyakuDate,months)){
-        const o=ensure(name); o.shiireCnt++; o.shiire+=p.mikomi;
+        // 契約基準も「実売優先」：実売価格が判明していればそちらを、未判明なら見込み(販売予定額ベース)を使う
+        // ＝仕入タブの「最新の見込み粗利（実売優先）」カード(shiireBestProfit)と同じ考え方を達成状況側にも反映
+        const o=ensure(name); o.shiireCnt++; o.shiire+=shiireBestProfit(it).value;
       }
     }
   });
@@ -2227,8 +2229,10 @@ function computeTsuusan(basis,fy){
       }
     } else {
       if(it.BuyKeiyakuDate&&inPeriod(it.BuyKeiyakuDate,fyMonths)){
-        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=p.mikomi;
-        const mi=monthIdx(it.BuyKeiyakuDate); if(mi>=0)o.monthly[mi]+=p.mikomi;
+        // computeStatsと同様、契約基準も「実売優先」に統一
+        const v=shiireBestProfit(it).value;
+        const o=ensure(it.Tantosha||'—'); o.shiireCnt++; o.shiire+=v;
+        const mi=monthIdx(it.BuyKeiyakuDate); if(mi>=0)o.monthly[mi]+=v;
       }
     }
   });
