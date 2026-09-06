@@ -1494,6 +1494,7 @@ async function newCustomer(){
     const id=r.d.ID;
     customers.unshift({id,name:'新規顧客',kana:'',type:'個人',rank:'C',tel:'',email:'',address:'',company:'',age:'',income:'',family:'',co_name:'',co_company:'',co_age:'',co_income:'',mediaDatetime:'',mediaSource:'',mediaPropName:'',memo:'',dupFlag:false,dupCandidateIds:[],cases:[{id:null,label:'案件①',phase:'問合せ',area:'',line:'',station:'',walk:'',landSize:'',buildSize:'',budget:'',kind:'',budgetMan:'',timing:'',media:'',mediaProp:'',mediaDate:'',keiyakuDate:'',memo:''}],logs:[]});
     selectedId=id;selectedCaseIdx=0;renderList();renderDetail();
+    document.querySelector('.body')?.classList.add('show-detail');
     showToast('新規顧客を作成しました');
   }catch(e){showToast('エラー: '+e.message,true);}
   hideLoading();
