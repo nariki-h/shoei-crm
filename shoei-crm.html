@@ -242,6 +242,14 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .dup-row-sub{font-size:11px;color:#8a5c0a;opacity:.75;}
 .dup-merge-btn{margin-left:auto;padding:4px 10px;border:none;background:#8a5c0a;color:#fff;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;}
 .dup-clear-btn{margin-top:6px;padding:4px 10px;border:1px solid #8a5c0a;background:transparent;color:#8a5c0a;border-radius:6px;font-size:11px;cursor:pointer;}
+/* 契約伝票の紐付け */
+.denpyo-linked{padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;line-height:1.8;}
+.denpyo-search-input{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);margin-bottom:8px;}
+.denpyo-cand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border);}
+.denpyo-cand:first-of-type{border-top:none;}
+.denpyo-cand-name{font-weight:600;}
+.denpyo-cand-sub{font-size:11px;color:var(--text-muted);}
+.denpyo-link-btn{margin-left:auto;padding:4px 10px;border:none;background:var(--accent);color:#fff;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;}
 /* 今週の追客サマリー */
 .week-panel{margin:0 12px 8px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;background:var(--bg);font-size:11px;color:var(--text-sub);}
 .week-panel .wp-title{font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;margin-bottom:6px;}
@@ -451,8 +459,11 @@ const CLIENT_ID='ebb78259-3e33-42c0-a391-25bedb2ca478';
 const TENANT_ID='c8bff07e-b699-4853-8c26-19be4a8759be';
 const SITE_URL='https://shoeih.sharepoint.com/sites/Shoei-RealEstate';
 const SCOPES=['https://shoeih.sharepoint.com/Sites.ReadWrite.All','User.Read'];
+// 契約伝票の索引リスト（dashboard.html側が伝票を読み込むたびに自動同期している）。
+// CaseId/CustomerIdの2列だけはCRM側が書く約束になっている（同期処理は絶対に触らない）。
+const DENPYO_LIST='契約伝票リスト';
 
-let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0;
+let msalApp=null, currentUser=null, customers=[], selectedId=null, selectedCaseIdx=0, denpyoIndex=[];
 let currentRole="member", currentTeam="", currentStaffName="";
 /* 氏名の表記ゆれ吸収。Azure ADの表示名「村上 光南」と
    担当者マスター/顧客リストの「村上光南」を同一人物として扱う。 */
@@ -727,6 +738,28 @@ async function loadCustomers(){
         memo:x['OData__x5185__x5bb9_']||'',
         staff:x['OData__x62c5__x5f53__x8005_']||''
       }));
+    }
+    // 契約伝票の索引（「契約伝票リスト」。dashboard.htmlが伝票を読み込むたびに自動同期している）。
+    // リスト自体やCaseId/CustomerId列がまだ無い環境でもCRM本体の読み込みは止めたくないので、
+    // 失敗しても黙って空のまま続行する（DupFlagと同じ考え方）。
+    try{
+      const denpyoItems=await spGetItems(DENPYO_LIST);
+      denpyoIndex=denpyoItems.map(i=>({
+        id:i.ID,no:i.Title||'',
+        keiyakuDate:(i.KeiyakuDate||'').slice(0,10),
+        hikiwatashiDate:(i.HikiwatashiDate||'').slice(0,10),
+        kessaiDate:(i.KessaiDate||'').slice(0,10),
+        staff:i.Tantosha||'',urinushi:i.Urinushi||'',kainushi:i.Kainushi||'',
+        bukkenType:i.BukkenType||'',shozai:i.Shozai||'',jukyo:i.Jukyo||'',
+        sougaku:i.Sougaku||0,uriage:i.Uriage||0,
+        hankyoBukken:i.HankyoBukken||'',
+        fileName:i.FileName||'',fileUrl:i.FileUrl||'',
+        caseId:(i.CaseId!=null&&i.CaseId!=='')?String(i.CaseId):'',
+        customerId:(i.CustomerId!=null&&i.CustomerId!=='')?String(i.CustomerId):''
+      }));
+    }catch(e){
+      console.warn('契約伝票リストの読み込みに失敗しました（未作成の可能性があります）:',e.message);
+      denpyoIndex=[];
     }
     showToast('読み込み完了');
   }catch(e){showToast('エラー: '+e.message,true);}
@@ -1195,6 +1228,10 @@ function renderDetail(){
           <div class="field-item full"><span class="fl">備考</span><div class="fv"><textarea rows="2" onchange="csf('memo',this.value)">${cs.memo}</textarea></div></div>
         </div>
       </div>
+      <div class="sec-card">
+        <div class="sec-title">契約伝票（${cs.label}）</div>
+        ${denpyoSectionHtml(c,cs)}
+      </div>
     </div>`;
 
   document.getElementById('phase-grid').innerHTML=PHASES.map(p=>`<div class="phase-opt${p===cs.phase?' selected':''}" onclick="setPhase('${p}')">${p}</div>`).join('');
@@ -1223,6 +1260,95 @@ function toDTLocal(s){if(!s)return '';const d=new Date(s);if(isNaN(d))return '';
 function fromDTLocal(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return v;const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;}
 function csf(k,v){const c=customers.find(x=>x.id===selectedId);if(c&&c.cases[selectedCaseIdx])c.cases[selectedCaseIdx][k]=v;}
 function switchCase(i){selectedCaseIdx=i;renderDetail();}
+
+/* ============================================================
+   契約伝票の紐付け（「契約伝票リスト」＝dashboard.htmlが自動同期する索引）
+   ・索引のCaseId列に、この案件(cs.id＝案件リストのID)を書き込むことで紐付ける。
+   ・索引の中身（契約日・金額・元ファイルURLなど）はdashboard.html側が同期するので、
+     CRM側はCaseId/CustomerIdの2列だけを書く（他の列は絶対に上書きしない）。
+   ============================================================ */
+function denpyoForCase(caseId){
+  if(!caseId) return null;
+  return denpyoIndex.find(d=>d.caseId&&String(d.caseId)===String(caseId))||null;
+}
+// 候補の絞り込み用に、伝票1件分の検索対象文字列をまとめて作る（買主名・所在地・物件名・伝票№）
+function denpyoSearchBlob(d){
+  return normName([d.no,d.kainushi,d.urinushi,d.shozai,d.hankyoBukken,d.bukkenType].join(' ')).toLowerCase();
+}
+function filterDenpyoCandidates(input){
+  const term=normName(input.value||'').toLowerCase();
+  document.querySelectorAll('#denpyo-cand-list .denpyo-cand').forEach(el=>{
+    const blob=el.getAttribute('data-blob')||'';
+    el.style.display=(!term||blob.includes(term))?'':'none';
+  });
+}
+function denpyoLinkedHtml(d){
+  return `<div class="denpyo-linked">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+      <div><span class="denpyo-cand-name">${d.kainushi||'（買主名未入力）'}</span><br/><span class="denpyo-cand-sub">${d.shozai||d.hankyoBukken||'所在地未入力'}　№${d.no}</span></div>
+      <button class="act-btn" onclick="unlinkDenpyo(${d.id})">紐付け解除</button>
+    </div>
+    <div style="margin-top:8px;">契約日：${d.keiyakuDate||'－'}　引渡日：${d.hikiwatashiDate||'－'}　決済日：${d.kessaiDate||'－'}</div>
+    <div>金額：${d.sougaku?Number(d.sougaku).toLocaleString()+'万円':'－'}　担当：${d.staff||'－'}</div>
+    ${d.fileUrl?`<div style="margin-top:8px;"><a class="act-btn" href="${d.fileUrl}" target="_blank" rel="noopener">📄 元ファイルを開く</a></div>`:''}
+  </div>`;
+}
+function denpyoCandidatesHtml(c,cs){
+  const unlinked=denpyoIndex.filter(d=>!d.caseId);
+  if(!denpyoIndex.length){
+    return '<div style="font-size:12px;color:var(--text-muted);">契約伝票の索引がまだありません（ダッシュボード側で伝票を読み込むと自動で作られます）</div>';
+  }
+  if(!unlinked.length){
+    return '<div style="font-size:12px;color:var(--text-muted);">紐付け可能な（未紐付けの）契約伝票が索引にありません</div>';
+  }
+  const term=String(c.name||'');
+  return `
+    <input type="text" class="denpyo-search-input" placeholder="買主名・物件名・所在地で絞り込み" value="${term.replace(/"/g,'&quot;')}" oninput="filterDenpyoCandidates(this)"/>
+    <div id="denpyo-cand-list">
+      ${unlinked.map(d=>{
+        const blob=denpyoSearchBlob(d);
+        const match=!term||blob.includes(normName(term).toLowerCase());
+        return `<div class="denpyo-cand" data-blob="${blob}" style="${match?'':'display:none;'}">
+          <div>
+            <div class="denpyo-cand-name">${d.kainushi||'（買主名未入力）'}</div>
+            <div class="denpyo-cand-sub">${d.shozai||d.hankyoBukken||'所在地未入力'}　№${d.no}　契約日:${d.keiyakuDate||'－'}　担当:${d.staff||'－'}</div>
+          </div>
+          <button class="denpyo-link-btn" onclick="linkDenpyo(${d.id},${cs.id},${c.id})">この伝票を紐付ける</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+function denpyoSectionHtml(c,cs){
+  if(!cs.id){
+    return '<div style="font-size:12px;color:var(--text-muted);">この案件を一度「保存」すると、契約伝票と紐付けられるようになります</div>';
+  }
+  const linked=denpyoForCase(cs.id);
+  return linked?denpyoLinkedHtml(linked):denpyoCandidatesHtml(c,cs);
+}
+async function linkDenpyo(denpyoId,caseId,customerId){
+  if(!canEdit()){showToast('閲覧専用のアカウントのため紐付けできません',true);return;}
+  showLoading('紐付け中...');
+  try{
+    await spUpdate(DENPYO_LIST,denpyoId,{CaseId:caseId,CustomerId:customerId});
+    const d=denpyoIndex.find(x=>x.id===denpyoId);
+    if(d){d.caseId=String(caseId);d.customerId=String(customerId);}
+    renderDetail();
+    showToast('契約伝票を紐付けました');
+  }catch(e){showToast('紐付けエラー: '+e.message,true);}
+  hideLoading();
+}
+async function unlinkDenpyo(denpyoId){
+  if(!canEdit()){showToast('閲覧専用のアカウントのため解除できません',true);return;}
+  showLoading('解除中...');
+  try{
+    await spUpdate(DENPYO_LIST,denpyoId,{CaseId:null,CustomerId:null});
+    const d=denpyoIndex.find(x=>x.id===denpyoId);
+    if(d){d.caseId='';d.customerId='';}
+    renderDetail();
+    showToast('紐付けを解除しました');
+  }catch(e){showToast('解除エラー: '+e.message,true);}
+  hideLoading();
+}
 function addCase(){
   const c=customers.find(x=>x.id===selectedId);
   const n=c.cases.length+1;
