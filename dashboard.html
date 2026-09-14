@@ -1694,7 +1694,7 @@ function denpyoFields(r){
     HankyoBaitai:dTxt(r.hankyoBaitai),
     HankyoBukken:dTxt(r.hankyoBukken),
     FileName:dTxt(r.fileName),
-    FileUrl:String(r.url||''),
+    FileUrl:r.url?(String(r.url).startsWith('http')?String(r.url):('https://shoeih.sharepoint.com'+String(r.url))):'',
     FileUpdated:r.updated||null
   };
 }
