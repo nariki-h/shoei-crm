@@ -1329,7 +1329,7 @@ async function linkDenpyo(denpyoId,caseId,customerId){
   if(!canEdit()){showToast('閲覧専用のアカウントのため紐付けできません',true);return;}
   showLoading('紐付け中...');
   try{
-    await spUpdate(DENPYO_LIST,denpyoId,{CaseId:caseId,CustomerId:customerId});
+    await spUpdate(DENPYO_LIST,denpyoId,{CaseId:String(caseId),CustomerId:String(customerId)});
     const d=denpyoIndex.find(x=>x.id===denpyoId);
     if(d){d.caseId=String(caseId);d.customerId=String(customerId);}
     renderDetail();
