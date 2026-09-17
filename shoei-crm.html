@@ -113,6 +113,11 @@ body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);
 .sidebar-filters input[type=date]{flex:1;min-width:0;font-size:11px;padding:5px 4px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);outline:none;}
 .sidebar-filters .date-label{font-size:11px;color:var(--text-muted);align-self:center;white-space:nowrap;}
 .sidebar-list{flex:1;overflow-y:auto;}
+/* 絞り込みの開閉ボタン（モバイル専用・PCでは非表示＝フィルタは常時表示のまま） */
+.filter-toggle{display:none;width:calc(100% - 24px);margin:0 12px 8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text-sub);font-size:13px;font-weight:600;cursor:pointer;justify-content:space-between;align-items:center;}
+.filter-toggle:after{content:'▾';color:var(--text-muted);}
+.filter-toggle.open:after{content:'▴';}
+.filter-toggle .ft-badge{margin-left:auto;margin-right:8px;font-size:11px;font-weight:700;color:var(--accent);}
 .sidebar-count{padding:6px 12px;font-size:11px;color:var(--text-muted);}
 .cust-item{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;}
 .cust-item:hover{background:var(--bg);}
@@ -305,6 +310,23 @@ body.readonly #import-btn{display:none!important;}
   /* モバイル時のみ「戻る」ボタンを表示 */
   .back-btn{display:inline-flex;}
 
+  /* 検索窓の余白を詰めて、一覧を1件でも多く見せる */
+  .sidebar-search{padding:10px 12px 8px;}
+
+  /* 絞り込みは既定で畳んでおく（トグルで開く） */
+  .filter-toggle{display:flex;}
+  .filters-wrap{display:none;}
+  .filters-wrap.open{display:block;}
+  /* 開いたときの「×」（期間解除）が全幅にならないように */
+  .sidebar-filters #filter-date-clear{width:auto;flex:0 0 auto;padding:6px 12px;}
+  .sidebar-filters #filter-date-clear:after{content:'';}
+
+  /* 「今週の追客」サマリーはモバイルでは非表示（JSがdisplayを直接書くので!important） */
+  #week-panel{display:none !important;}
+
+  /* CSV取込・エクスポートはPC作業前提。モバイルでは非表示 */
+  #import-btn,#export-btn{display:none !important;}
+
   /* フォーム：3列表示は1列に（2列はそのまま） */
   .field-grid.three{grid-template-columns:1fr;}
 
@@ -362,6 +384,8 @@ body.readonly #import-btn{display:none!important;}
       <div class="sidebar-search">
         <input type="text" placeholder="氏名・電話・物件名などで横断検索" id="search-input" title="氏名／カナ／住所／電話番号／メール／勤務先／反響物件／反響媒体／共同申込人／希望エリア・路線・駅／備考 を横断検索します。スペース区切りでAND検索。"/>
       </div>
+      <button class="filter-toggle" id="filter-toggle" onclick="toggleFilters()"><span>絞り込み・並び替え</span><span class="ft-badge" id="filter-toggle-badge"></span></button>
+      <div class="filters-wrap" id="filters-wrap">
       <div class="sidebar-filters">
         <div class="selector-wrap" style="flex:1 1 100%;">
           <button class="selector-trigger" id="phase-filter-trigger" onclick="toggleDropdown('phase-filter-dd',event)">フェーズ</button>
@@ -394,6 +418,7 @@ body.readonly #import-btn{display:none!important;}
         <input type="date" id="filter-date-to" title="反響日（終了）"/>
         <button class="selector-trigger" id="filter-date-clear" title="期間指定を解除" style="flex:0 0 auto;">×</button>
       </div>
+      </div><!-- /filters-wrap -->
       <div class="week-panel" id="week-panel" style="display:none;"></div>
       <div class="sidebar-count" id="list-count">--</div>
       <div class="sidebar-list" id="customer-list"></div>
@@ -934,9 +959,33 @@ function getFilteredCustomers(){
   return f;
 }
 
+/* モバイルで絞り込み欄を開閉する。PCではボタン自体が非表示なので影響なし。 */
+function toggleFilters(){
+  const w=document.getElementById('filters-wrap'), b=document.getElementById('filter-toggle');
+  if(!w||!b) return;
+  const open=w.classList.toggle('open');
+  b.classList.toggle('open',open);
+}
+/* 畳んでいても「今どれかで絞り込んでいる」ことが分かるようにボタンに件数を出す。 */
+function updateFilterBadge(){
+  const b=document.getElementById('filter-toggle-badge');
+  if(!b) return;
+  let n=0;
+  const v=id=>(document.getElementById(id)?.value||'');
+  if(v('filter-rank')) n++;
+  if(v('filter-staff')) n++;
+  if(v('filter-date-from')||v('filter-date-to')) n++;
+  if(v('sort-select')&&v('sort-select')!=='hankyo_new') n++;
+  // フェーズは「完了系を除いた既定の状態」と違うときだけ適用中とみなす
+  const defPhases=PHASES.filter(p=>!COMPLETED_PHASES.includes(p));
+  if(selectedPhases.size!==defPhases.length||!defPhases.every(p=>selectedPhases.has(p))) n++;
+  b.textContent=n?`${n}件適用中`:'';
+}
+
 function renderList(){
   const f=getFilteredCustomers();
   renderWeekPanel(f);
+  updateFilterBadge();
   document.getElementById('list-count').textContent=f.length+'件';
   document.getElementById('customer-list').innerHTML=f.map(c=>{
     const d=daysSince(lastLogDate(c,TOUCH_TYPES));
