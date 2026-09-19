@@ -368,6 +368,13 @@ body.readonly #import-btn{display:none!important;}
   .det-body{padding:12px;}
   .det-head{padding:14px 12px;}
 
+  /* 案件タブ直下：フェーズと案件担当者を1行に並べ、契約日は隠す（PCでは従来どおり） */
+  .case-meta{display:flex;align-items:center;gap:8px;}
+  .case-meta .phase-row{margin-bottom:0 !important;flex:1 1 auto;min-width:0;}
+  .case-meta .case-staff-row .phase-label-sm{display:none;}
+  .case-meta .case-staff-row{flex:1 1 40%;}
+  .case-keiyaku-row{display:none;}
+
   /* トーストを画面下中央に */
   .toast{left:16px;right:16px;bottom:16px;text-align:center;}
 }
@@ -1150,18 +1157,20 @@ function renderDetail(){
       <button class="tab-add" onclick="addCase()">＋</button>
     </div>
     <div class="det-head" style="border-top:1px solid var(--border);">
+      <div class="case-meta">
       <div class="phase-row" style="margin-bottom:8px;">
         <span class="phase-label-sm">フェーズ</span>
         <div class="phase-badge" onclick="openModal()">${cs.phase} ▾</div>
       </div>
-      <div class="phase-row" style="margin-bottom:8px;">
+      <div class="phase-row case-staff-row" style="margin-bottom:8px;">
         <span class="phase-label-sm">案件担当者</span>
         <select id="case-staff-select" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);">
           <option value="">未設定</option>
           ${(window.SALES_LIST||[]).map(s=>`<option${normName(cs.staff)===normName(s)?' selected':''}>${s}</option>`).join('')}
         </select>
       </div>
-      <div class="phase-row">
+      </div>
+      <div class="phase-row case-keiyaku-row">
         <span class="phase-label-sm">契約日</span>
         <input type="date" value="${cs.keiyakuDate||''}" onchange="csf('keiyakuDate',this.value)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);"/>
       </div>
