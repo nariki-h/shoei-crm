@@ -437,6 +437,7 @@ table.bk tbody tr:last-child td{border-bottom:none;}
 table.bk tbody tr:hover{background:#f5f8fd;}
 table.bk th.num,table.bk th.ctr,td.num,td.ctr{text-align:center;}
 td.nm{font-weight:600;color:var(--text);}
+td.addr{white-space:nowrap;}
 td .walk{margin-left:.6em;color:var(--text-muted);font-variant-numeric:tabular-nums;}
 .tlink{color:var(--accent);text-decoration:none;font-weight:500;}
 .tlink:hover{text-decoration:underline;}
@@ -847,6 +848,7 @@ const COLS=[
   {k:F.land,l:'土地㎡',c:'ctr'},
   {k:F.bldg,l:'建物㎡',c:'ctr'},
   {k:F.ward,l:'市区',c:'ctr'},
+  {k:F.addr,l:'所在地'},
   {k:F.s1,l:'最寄駅'},
   {k:F.pdf,l:'顧客向けPDF',nosort:true,c:'ctr'},
   {k:F.other,l:'その他資料',nosort:true,c:'ctr'},
@@ -861,6 +863,11 @@ function pdfCell(i){
   if(!u)return '<span class="dash">—</span>';
   return `<a class="tlink" href="${esc(u)}" target="_blank" onclick="event.stopPropagation()">PDF</a>
     <button class="copybtn" onclick="event.stopPropagation();copyLink('${esc(u)}')">コピー</button>`;
+}
+function addrLabel(i){
+  let a=String(i[F.addr]||'').trim(); const w=String(i[F.ward]||'').trim();
+  a=a.replace(/^東京都/,''); if(w&&a.startsWith(w))a=a.slice(w.length);
+  return a.trim();
 }
 function stationLabel(i){
   const s=String(i[F.s1]||'').trim(); if(!s)return '';
@@ -891,6 +898,7 @@ function renderList(){
     <td class="num sub">${fmtRange(i[F.land],i[F.landmax])}</td>
     <td class="num sub">${fmtRange(i[F.bldg],i[F.bldgmax])}</td>
     <td class="sub ctr">${esc(i[F.ward]||'')}</td>
+    <td class="addr">${esc(addrLabel(i))}</td>
     <td class="sub">${stationLabel(i)}</td>
     <td class="ctr">${pdfCell(i)}</td>
     <td class="ctr">${otherCell(i)}</td>
@@ -903,7 +911,7 @@ function renderList(){
   const cards=rows.map(i=>`<li onclick="select(${i.Id})">
     <div class="mc-top"><span class="mc-nm">${esc(i[F.title]||'(名称未設定)')}</span><span class="st-pill st-${esc(i[F.sale]||'販売中')}">${esc(i[F.sale]||'—')}</span></div>
     <div class="mc-price">${fmtRange(i[F.price],i[F.pricemax])}<small>万円</small>${nv(i[F.units])?`<small> ・${i[F.units]}区画</small>`:''}</div>
-    <div class="mc-meta">${[esc(i[F.type]||''),esc(i[F.ward]||''),stationLabel(i),nv(i[F.land])!==null?`土地 ${fmtRange(i[F.land],i[F.landmax])}㎡`:''].filter(Boolean).join('<span class="mc-sep"></span>')}</div>
+    <div class="mc-meta">${[esc(i[F.type]||''),esc((i[F.ward]||'')+addrLabel(i)),stationLabel(i),nv(i[F.land])!==null?`土地 ${fmtRange(i[F.land],i[F.landmax])}㎡`:''].filter(Boolean).join('<span class="mc-sep"></span>')}</div>
     <div class="mc-links">${urlOf(i[F.pdf])?pdfCell(i):''}${(urlOf(i[F.other])||urlOf(i[F.folder]))?otherCell(i):''}${i[F.nf]?'<span class="dot-notify">● 通知待ち</span>':''}</div>
   </li>`).join('');
   document.getElementById('tbl').innerHTML=`<table class="bk"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table><ul class="mcards">${cards}</ul>`;
