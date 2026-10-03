@@ -1542,6 +1542,9 @@ function parseDenpyo(buf,fileName,updated,folder,fileUrl){
     hankyoDate:d('AB43','反響日'), hankyoBaitai:v('AT43')||'',
     hankyoBukken:[v('AB44'),v('AG44'),v('AL44')].filter(Boolean).join(' '),
     hankyoPrice:n('AT44'),
+    // 書類作成：I24＝翔栄作成、AU24＝他社仲介作成（セル内チェックボックス、値はTRUE/FALSE）
+    // 'shoei'/'tasha'/''（どちらも未チェック）。両方TRUEは翔栄を優先。
+    shoruiSakusei: v('I24')===true ? 'shoei' : (v('AU24')===true ? 'tasha' : ''),
   };
 }
 
@@ -2035,7 +2038,7 @@ function renderUriage(){
     <div class="uri-table-wrap"><table class="uri">
       <thead><tr>
         <th class="left">№</th><th class="left">${isNyukin?'入金日':'契約日'}</th><th class="left">${isNyukin?'区分':'決済日'}</th>
-        <th class="left">担当</th><th class="left">物件</th><th class="left">売主</th><th class="left">買主</th>
+        <th class="left">担当</th><th class="left">物件</th><th class="left">売主</th><th class="left">買主</th><th class="left">契約書</th>
         <th>総額</th><th>${isNyukin?'入金額（税前）':'売上計上'}</th><th class="left">入金状況</th><th class="left">反響媒体</th><th class="left">保管場所</th>
       </tr></thead>
       <tbody>${units.map(u=>{const r=u.row;return `
@@ -2047,6 +2050,9 @@ function renderUriage(){
           <td class="left" title="${(r.shozai||'').replace(/"/g,'')}">${r.jukyo||r.shozai||'-'}<br><span style="font-size:10px;color:var(--text3)">${r.bukkenType||''}</span></td>
           <td class="left">${r.urinushi||'-'}</td>
           <td class="left">${r.kainushi||'-'}</td>
+          <td class="left">${r.shoruiSakusei==='shoei'?'<span class="pill">翔栄作成</span>'
+            :r.shoruiSakusei==='tasha'?'<span style="font-size:11px;color:var(--text2);">他社作成</span>'
+            :'<span style="font-size:10px;color:var(--amber);">未選択</span>'}</td>
           <td>${yen(r.sougaku)}</td>
           <td style="font-weight:700;color:var(--green)">${yen(u.amount)}</td>
           <td class="left" style="font-size:10px;">${nyukinCell(r)}</td>
