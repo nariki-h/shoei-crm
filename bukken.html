@@ -574,6 +574,7 @@ td .walk{margin-left:.6em;color:var(--text-muted);font-variant-numeric:tabular-n
       <button class="linkbtn" onclick="clearFilters()">条件クリア</button>
       <div class="fb-spacer"></div>
       <button class="bk-btn primary" onclick="newItem()">＋ 新規登録</button>
+      <button class="bk-btn" id="export-btn" style="display:none;" onclick="exportCSV()" title="いま表示中の物件をCSVで書き出す">CSV書き出し</button>
       <button class="bk-btn" onclick="loadItems()">再読込</button>
     </div>
     <div class="tblcount" id="count"></div>
@@ -632,6 +633,7 @@ const F={title:'Title',pub:'PubStatus',sale:'SaleStatus',acq:'AcquiredDate',chk:
   nf:'NotifyFlag',na:'NotifiedAt',nc:'NotifiedCount',nl:'NotifyLog'};
 
 let msalApp=null,currentUser=null,items=[],cur=null,view='active',listType=null;
+let currentRole='member'; // 担当者マスターの「役職」。CSV書き出しはadminのみ（CRMと同じ）
 let sortKey='Modified',sortDir=-1;
 let openSecs=new Set(['基本情報','交通・規模']);
 
@@ -662,7 +664,24 @@ async function onSignedIn(){
   document.getElementById('user-name').textContent=n;
   document.getElementById('user-initials').textContent=n.slice(0,2);
   initFilters();
+  await loadRole();
   await loadItems();
+}
+/* 担当者マスターから自分の役職を引く。CRMと同じく表示名の空白を無視して照合する。
+   読めなくても物件一覧は止めない（その場合はmember扱い＝CSVボタン非表示）。 */
+async function loadRole(){
+  const norm=s=>String(s==null?'':s).replace(/[\s\u3000]/g,'');
+  try{
+    const token=await getToken();
+    const r=await fetch(`${SITE_URL}/_api/web/lists/getbytitle('担当者マスター')/items?$select=Title,OData__x5f79__x8077_&$top=500`,
+      {headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    const me=norm(currentUser.name||currentUser.username);
+    const hit=d.d.results.find(i=>norm(i.Title)===me);
+    currentRole=hit?String(hit.OData__x5f79__x8077_||'member').trim():'member';
+  }catch(e){currentRole='member';}
+  document.getElementById('export-btn').style.display=currentRole==='admin'?'':'none';
 }
 
 /* ================= SharePoint ================= */
@@ -916,6 +935,43 @@ function renderList(){
   </li>`).join('');
   document.getElementById('tbl').innerHTML=`<table class="bk"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table><ul class="mcards">${cards}</ul>`;
   updateFilterBadge();
+}
+
+/* ================= CSV書き出し ================= */
+/* 一覧で今表示している物件（絞り込み・並び順を反映）を書き出す。Excelで文字化けしないようUTF-8 BOM付き。 */
+const CSV_COLS=[
+  ['ID',i=>i.Id],['物件名',i=>i[F.title]],['公開区分',i=>i[F.pub]],['状況',i=>i[F.sale]],['種別',i=>i[F.type]],
+  ['価格(万円)',i=>i[F.price]],['価格上限(万円)',i=>i[F.pricemax]],['区画数',i=>i[F.units]],['価格帯',i=>i[F.band]],
+  ['当初価格(万円)',i=>i[F.fprice]],['当初価格メモ',i=>i[F.fnote]],
+  ['都道府県',i=>i[F.pref]],['市区',i=>i[F.ward]],['所在地',i=>i[F.addr]],['表示用住所',i=>i[F.daddr]],['エリア',i=>i[F.area]],
+  ['沿線1',i=>i[F.l1]],['駅1',i=>i[F.s1]],['徒歩1(分)',i=>i[F.w1]],
+  ['沿線2',i=>i[F.l2]],['駅2',i=>i[F.s2]],['徒歩2(分)',i=>i[F.w2]],
+  ['沿線3',i=>i[F.l3]],['駅3',i=>i[F.s3]],['徒歩3(分)',i=>i[F.w3]],
+  ['土地㎡',i=>i[F.land]],['土地上限㎡',i=>i[F.landmax]],['建物㎡',i=>i[F.bldg]],['建物上限㎡',i=>i[F.bldgmax]],['間取り',i=>i[F.layout]],
+  ['紹介可否',i=>i[F.intro]],['紹介メモ',i=>i[F.inote]],
+  ['売主会社',i=>i[F.sc]],['売主担当',i=>i[F.sn]],['売主TEL',i=>i[F.st]],
+  ['メモ',i=>i[F.memo]],['取得日',i=>d10(i[F.acq])],['最終確認日',i=>d10(i[F.chk])],
+  ['顧客向けPDF',i=>urlOf(i[F.pdf])],['その他資料',i=>urlOf(i[F.other])],['物件フォルダ',i=>urlOf(i[F.folder])],['情報元URL',i=>urlOf(i[F.src])],
+  ['通知待ち',i=>i[F.nf]?'待ち':''],['最終通知日',i=>d10(i[F.na])],['通知件数',i=>i[F.nc]],
+  ['更新日時',i=>i.Modified?new Date(i.Modified).toLocaleString('ja-JP'):'']
+];
+function csvEsc(v){
+  if(v===null||v===undefined)return '';
+  const t=String(v);
+  return /[",\r\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;
+}
+function exportCSV(){
+  if(currentRole!=='admin'){toast('CSV書き出しは管理者（admin）のみ使えます');return;}
+  const rows=filtered();
+  if(!rows.length){toast('書き出す物件がありません（絞り込み条件を確認してください）');return;}
+  const lines=[CSV_COLS.map(c=>csvEsc(c[0])).join(',')];
+  rows.forEach(i=>lines.push(CSV_COLS.map(c=>csvEsc(c[1](i))).join(',')));
+  const d=new Date(),z=n=>String(n).padStart(2,'0');
+  const fn=`未公開物件_${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}.csv`;
+  const blob=new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fn;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  toast(`${rows.length}件をCSVに書き出しました`);
 }
 
 /* ================= 画面切替 ================= */
