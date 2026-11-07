@@ -1342,6 +1342,9 @@ function cf(id,k,v){
 function toDTLocal(s){if(!s)return '';const d=new Date(s);if(isNaN(d))return '';const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;}
 function fromDTLocal(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return v;const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;}
 function csf(k,v){const c=customers.find(x=>x.id===selectedId);if(c&&c.cases[selectedCaseIdx])c.cases[selectedCaseIdx][k]=v;}
+/* 案件リストのタイトルは「顧客名｜案件①」にする（SharePointで直接見たときに誰の案件か分かるように）。
+   CRMはタイトルを読まず、案件の番号は「案件ラベル」列で管理しているので、表示専用の値。 */
+function caseTitle(name,label){return `${String(name||'（名前未入力）').trim()}｜${label||'案件①'}`.slice(0,255);}
 function switchCase(i){selectedCaseIdx=i;renderDetail();}
 
 /* ============================================================
@@ -1518,7 +1521,7 @@ async function mergeDuplicate(keepId, loseId){
       n++;
       const newLabel=`案件${labels[n-1]||n}`;
       await spUpdate('案件リスト',cs.id,{
-        Title:newLabel,
+        Title:caseTitle(keep.name,newLabel),
         'OData__x9867__x5ba2_ID':String(keepId),
         'OData__x6848__x4ef6__x30e9__x30d9__x30':newLabel
       });
@@ -1587,7 +1590,7 @@ async function saveCustomer(){
       'OData__x5099__x8003_':c.memo
     });
     for(const cs of c.cases){
-      const body={Title:cs.label,
+      const body={Title:caseTitle(c.name,cs.label),
         'OData__x9867__x5ba2_ID':String(c.id),
         'OData__x6848__x4ef6__x30e9__x30d9__x30':cs.label,
         'OData__x30d5__x30a7__x30fc__x30ba_':cs.phase,
