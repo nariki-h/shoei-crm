@@ -526,6 +526,24 @@ td .walk{margin-left:.6em;color:var(--text-muted);font-variant-numeric:tabular-n
   table.bk{display:none;}
   .mcards{display:block;}
 }
+
+/* --- 写真 --- */
+.ph-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
+.ph{background:var(--surface);border-radius:14px;box-shadow:0 0 0 1px var(--hair);padding:6px;position:relative;cursor:grab;}
+.ph.drag{opacity:.35;}
+.ph.over{box-shadow:0 0 0 2px var(--accent);}
+.ph-img{aspect-ratio:4/3;border-radius:9px;background:var(--fill);overflow:hidden;display:flex;align-items:center;justify-content:center;
+  color:var(--text-muted);font-size:10px;text-align:center;word-break:break-all;padding:0;}
+.ph-img img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;}
+.ph-no{position:absolute;top:11px;left:11px;background:rgba(29,29,31,.72);color:#fff;font-size:11px;font-weight:600;border-radius:980px;padding:1px 8px;}
+.ph-no.main{background:var(--accent);}
+.ph select{width:100%;margin-top:6px;padding:6px 26px 6px 9px;font-size:12px;border-radius:8px;border:none;background-color:var(--fill);color:var(--text);font-family:inherit;}
+.ph-ops{display:flex;justify-content:space-between;align-items:center;margin-top:4px;}
+.ph-ops button{border:none;background:none;color:var(--text-sub);font-size:12px;cursor:pointer;padding:4px 8px;border-radius:7px;font-family:inherit;}
+.ph-ops button:hover:not(:disabled){background:var(--fill);color:var(--text);}
+.ph-ops button:disabled{opacity:.3;cursor:default;}
+.ph-ops .del:hover:not(:disabled){color:var(--danger);background:rgba(215,0,21,.08);}
+.ph-cnt{font-size:12px;font-weight:500;color:var(--text-muted);margin-left:6px;}
 @media(prefers-reduced-motion:reduce){*{transition:none !important;}}
 
 </style>
@@ -635,7 +653,7 @@ const F={title:'Title',pub:'PubStatus',sale:'SaleStatus',acq:'AcquiredDate',chk:
 let msalApp=null,currentUser=null,items=[],cur=null,view='active',listType=null;
 let currentRole='member'; // 担当者マスターの「役職」。CSV書き出しはadminのみ（CRMと同じ）
 let sortKey='Modified',sortDir=-1;
-let openSecs=new Set(['基本情報','交通・規模']);
+let openSecs=new Set(['基本情報','交通・規模','写真']);
 
 /* ================= 認証 ================= */
 function showLoginError(m){const e=document.getElementById('login-error');if(e){e.textContent=m;e.style.display='block';}else alert(m);}
@@ -1062,6 +1080,21 @@ function renderForm(){
     </div>
   </div>
 
+  <div class="sec${secCls('写真')}">
+    <div class="sec-head" onclick="tog(this,'写真');if(!this.parentElement.classList.contains('closed'))showPhotos();"><span>写真<span class="ph-cnt" id="ph-count"></span></span> <span class="caret">${secCar('写真')}</span></div>
+    <div class="sec-body">
+      ${i.Id?`
+      <div class="dz" id="ph-dz" onclick="document.getElementById('ph-picker').click()">
+        写真をここにドラッグ＆ドロップ（クリックで選択・複数まとめてOK）<br>
+        <span style="font-size:11px;">1枚目がメイン写真です。並び替えはドラッグか ← →、種類はプルダウンで選びます。変更は自動で保存されます</span>
+      </div>
+      <input type="file" id="ph-picker" accept="image/*" multiple style="display:none" onchange="handlePhotos(this.files);this.value='';">
+      <div class="hint" id="ph-status" style="grid-column:1/-1;"></div>
+      <div class="ph-grid" id="ph-grid"></div>
+      `:`<div class="warnbox">写真を追加するには、先に「保存」して物件を登録してください（保存後にフォルダが作られます）。</div>`}
+    </div>
+  </div>
+
   <div class="sec${secCls('売主・元付')}">
     <div class="sec-head" onclick="tog(this,'売主・元付')">売主・元付 <span class="caret">${secCar('売主・元付')}</span></div>
     <div class="sec-body">
@@ -1115,7 +1148,7 @@ function renderForm(){
       <div class="fi full"><label>通知先ログ</label><textarea class="ro" readonly>${esc(i[F.nl]||'')}</textarea></div>
     </div>
   </div>`;
-  if(i.Id)initDropzone();
+  if(i.Id){initDropzone();initPhotoDropzone();if(openSecs.has('写真'))showPhotos();}
 }
 function fileRow(label,url,copy,dispName,extra){
   if(!url)return `<div class="filelink"><span style="color:var(--text-muted);min-width:100px;">${label}</span><span style="color:var(--text-muted);">未登録</span></div>`;
@@ -1274,6 +1307,194 @@ async function handleFiles(files){
     await loadItems();
     cur=items.find(x=>x.Id===id);renderForm();
   }catch(e){toast(e.message);if(dz)dz.textContent='ここにファイルをドラッグ＆ドロップ（クリックで選択）';}
+}
+
+/* ================= 写真 =================
+   物件フォルダの中の「写真」フォルダに保存する。
+   並び順と種類は同じフォルダの _photos.json に持つ（SharePointリストの列は増やさない）。
+   一覧表示用に長辺480pxの縮小版を「写真/_thumb」に作る。 */
+const PHOTO_DIR='写真',THUMB_DIR='_thumb',PHOTO_MANIFEST='_photos.json';
+const PHOTO_CATS=['未分類','外観','現地','区画図','間取り図','LDK','リビング','ダイニング','キッチン','浴室','洗面','トイレ','居室','収納','玄関','バルコニー','庭','駐車場','眺望','設備','周辺環境','地図','その他'];
+let photos=[],photoFor=null,photoBusy=false,photoDragIdx=null,manTimer=null;
+const thumbCache={};
+function photoDir(i){return folderPathOf(i)+'/'+PHOTO_DIR;}
+function isImageName(n){return /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(String(n||''));}
+function isViewable(n){return /\.(jpe?g|png|gif|webp)$/i.test(String(n||''));}
+function thumbName(n){return String(n).replace(/\.[^.]+$/,'')+'.jpg';}
+function spPath(p){return encodeURIComponent(String(p).replace(/'/g,"''"));}
+
+async function spListFiles(folder){
+  const token=await getToken();
+  const r=await fetch(`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${spPath(folder)}')/Files?$select=Name,TimeCreated&$top=5000`,
+    {headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}});
+  if(r.status===404)return [];
+  if(!r.ok){const t=unesc(await r.text());if(/not exist|存在しません|見つかりません|File Not Found/i.test(t))return [];throw new Error('写真の読み込みに失敗: '+t.slice(0,150));}
+  return (await r.json()).d.results;
+}
+async function spGetBlob(path){
+  const token=await getToken();
+  const r=await fetch(`${SITE_URL}/_api/web/GetFileByServerRelativePath(decodedurl='${spPath(path)}')/$value`,{headers:{'Authorization':'Bearer '+token}});
+  return r.ok?await r.blob():null;
+}
+async function spPutBlob(blob,folder,name,token,digest){
+  const r=await fetch(`${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${spPath(folder)}')/Files/add(url='${spPath(name)}',overwrite=true)`,
+    {method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-RequestDigest':digest},body:await blob.arrayBuffer()});
+  if(!r.ok){const t=unesc(await r.text());throw new Error('写真のアップロードに失敗: '+t.slice(0,180));}
+}
+async function spRecycleFile(path,token,digest){
+  const r=await fetch(`${SITE_URL}/_api/web/GetFileByServerRelativePath(decodedurl='${spPath(path)}')/recycle()`,
+    {method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose','X-RequestDigest':digest}});
+  if(!r.ok&&r.status!==404){const t=unesc(await r.text());if(!/not exist|存在しません|見つかりません|File Not Found/i.test(t))throw new Error('写真の削除に失敗: '+t.slice(0,150));}
+}
+async function writeManifest(dir,list){
+  const token=await getToken();const digest=await getDigest(token);
+  const data={version:1,updated:new Date().toISOString(),photos:list.map(p=>({name:p.name,cat:p.cat||'未分類'}))};
+  await spPutBlob(new Blob([JSON.stringify(data,null,1)],{type:'application/json'}),dir,PHOTO_MANIFEST,token,digest);
+}
+function setPhotoStatus(m){const e=document.getElementById('ph-status');if(e)e.textContent=m||'';}
+
+/* セクションを開いたとき：読み込み済みなら描画だけ、未読み込みなら取得 */
+function showPhotos(){if(!cur||!cur.Id)return;if(photoFor===cur.Id)renderPhotos();else loadPhotos();}
+async function loadPhotos(){
+  if(!cur||!cur.Id)return;
+  const id=cur.Id,dir=photoDir(cur);
+  const g=document.getElementById('ph-grid');if(g)g.innerHTML='<div class="hint" style="grid-column:1/-1;">写真を読み込み中…</div>';
+  try{
+    const [files,mb]=await Promise.all([spListFiles(dir),spGetBlob(dir+'/'+PHOTO_MANIFEST)]);
+    let man=[];
+    if(mb){try{const j=JSON.parse(await mb.text());man=Array.isArray(j)?j:(j.photos||[]);}catch(e){man=[];}}
+    const real=files.filter(f=>f.Name!==PHOTO_MANIFEST&&isImageName(f.Name));
+    const names=new Set(real.map(f=>f.Name));
+    const list=man.filter(p=>p&&names.has(p.name)).map(p=>({name:p.name,cat:p.cat||'未分類'}));
+    const known=new Set(list.map(p=>p.name));
+    // SharePointに直接入れた写真など、まだ並びに入っていないものは末尾に足す
+    real.filter(f=>!known.has(f.Name)).sort((a,b)=>String(a.TimeCreated).localeCompare(String(b.TimeCreated)))
+      .forEach(f=>list.push({name:f.Name,cat:'未分類'}));
+    if(!cur||cur.Id!==id)return;
+    photos=list;photoFor=id;renderPhotos();
+  }catch(e){if(cur&&cur.Id===id&&g)g.innerHTML=`<div class="warnbox">${esc(e.message)}</div>`;}
+}
+function renderPhotos(){
+  const g=document.getElementById('ph-grid');if(!g||!cur||photoFor!==cur.Id)return;
+  const c=document.getElementById('ph-count');if(c)c.textContent=photos.length?photos.length+'枚':'';
+  if(!photos.length){g.innerHTML='<div class="hint" style="grid-column:1/-1;">まだ写真がありません。上の枠にドラッグして追加してください。</div>';return;}
+  g.innerHTML=photos.map((p,k)=>{
+    const cats=PHOTO_CATS.includes(p.cat)?PHOTO_CATS:[p.cat].concat(PHOTO_CATS);
+    return `<div class="ph" draggable="true" data-k="${k}">
+      <div class="ph-img" id="ph-img-${k}">${esc(p.name)}</div>
+      <span class="ph-no${k===0?' main':''}">${k===0?'メイン':k+1}</span>
+      <select onchange="setPhotoCat(${k},this.value)" aria-label="写真${k+1}の種類">${cats.map(x=>`<option${x===p.cat?' selected':''}>${esc(x)}</option>`).join('')}</select>
+      <div class="ph-ops">
+        <button onclick="movePhoto(${k},-1)" ${k===0?'disabled':''} aria-label="前へ">←</button>
+        <button class="del" onclick="deletePhoto(${k})">削除</button>
+        <button onclick="movePhoto(${k},1)" ${k===photos.length-1?'disabled':''} aria-label="後ろへ">→</button>
+      </div></div>`;}).join('');
+  g.querySelectorAll('.ph').forEach(el=>{
+    el.addEventListener('dragstart',e=>{photoDragIdx=+el.dataset.k;el.classList.add('drag');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','photo');});
+    el.addEventListener('dragend',()=>{el.classList.remove('drag');photoDragIdx=null;});
+    el.addEventListener('dragover',e=>{if(photoDragIdx===null)return;e.preventDefault();el.classList.add('over');});
+    el.addEventListener('dragleave',()=>el.classList.remove('over'));
+    el.addEventListener('drop',e=>{
+      if(photoDragIdx===null)return;e.preventDefault();e.stopPropagation();el.classList.remove('over');
+      const from=photoDragIdx,to=+el.dataset.k;photoDragIdx=null;if(from===to)return;
+      const [m]=photos.splice(from,1);photos.splice(to,0,m);renderPhotos();queueManifest();
+    });
+  });
+  const dir=photoDir(cur);
+  photos.forEach((p,k)=>showThumb(dir,p.name,k));
+}
+async function showThumb(dir,name,k){
+  const key=dir+'/'+name;
+  let u=thumbCache[key];
+  if(!u){
+    let b=await spGetBlob(dir+'/'+THUMB_DIR+'/'+thumbName(name));
+    if(!b&&isViewable(name))b=await spGetBlob(key);
+    if(!b)return;
+    u=thumbCache[key]=URL.createObjectURL(b);
+  }
+  const box=document.getElementById('ph-img-'+k);
+  if(box&&photos[k]&&photos[k].name===name)box.innerHTML=`<img src="${u}" alt="">`;
+}
+function queueManifest(){
+  if(!cur||!cur.Id)return;
+  const dir=photoDir(cur),list=photos.slice();
+  setPhotoStatus('保存中…');
+  clearTimeout(manTimer);
+  manTimer=setTimeout(()=>writeManifest(dir,list).then(()=>setPhotoStatus('並びと種類を保存しました')).catch(e=>{setPhotoStatus('');toast(e.message);}),700);
+}
+function movePhoto(k,d){
+  const t=k+d;if(t<0||t>=photos.length)return;
+  [photos[k],photos[t]]=[photos[t],photos[k]];renderPhotos();queueManifest();
+}
+function setPhotoCat(k,v){if(!photos[k])return;photos[k].cat=v;queueManifest();}
+async function deletePhoto(k){
+  const p=photos[k];if(!p||!cur||!cur.Id||photoBusy)return;
+  if(!confirm(`${k===0?'メイン写真':k+1+'枚目の写真'}（${p.cat}）を削除します。\nSharePointのごみ箱に入るので、必要なら復元できます。よろしいですか？`))return;
+  const dir=photoDir(cur);
+  photoBusy=true;
+  try{
+    const token=await getToken();const digest=await getDigest(token);
+    await spRecycleFile(dir+'/'+p.name,token,digest);
+    await spRecycleFile(dir+'/'+THUMB_DIR+'/'+thumbName(p.name),token,digest);
+    const key=dir+'/'+p.name;if(thumbCache[key]){URL.revokeObjectURL(thumbCache[key]);delete thumbCache[key];}
+    photos.splice(photos.indexOf(p),1);renderPhotos();
+    await writeManifest(dir,photos);
+    setPhotoStatus('写真を削除しました');
+  }catch(e){toast(e.message);}
+  finally{photoBusy=false;}
+}
+/* 長辺480pxのJPEGを作る。HEICなどブラウザで開けない形式は作らない（null） */
+async function makeThumb(file){
+  try{
+    const bmp=await createImageBitmap(file);
+    const s=Math.min(1,480/Math.max(bmp.width,bmp.height));
+    const c=document.createElement('canvas');c.width=Math.round(bmp.width*s);c.height=Math.round(bmp.height*s);
+    c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);bmp.close&&bmp.close();
+    return await new Promise(res=>c.toBlob(b=>res(b),'image/jpeg',0.8));
+  }catch(e){return null;}
+}
+function initPhotoDropzone(){
+  const dz=document.getElementById('ph-dz');if(!dz)return;
+  ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{if(photoDragIdx!==null)return;e.preventDefault();dz.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('over');}));
+  dz.addEventListener('drop',e=>{if(photoDragIdx===null&&e.dataTransfer.files.length)handlePhotos(e.dataTransfer.files);});
+}
+async function handlePhotos(files){
+  if(!cur||!cur.Id||!files||!files.length)return;
+  if(photoBusy){toast('前のアップロードが終わるまでお待ちください');return;}
+  const imgs=[...files].filter(f=>/^image\//.test(f.type)||isImageName(f.name));
+  if(!imgs.length){toast('画像ファイルを選んでください');return;}
+  if(imgs.length<files.length)toast('画像以外のファイルは除外しました（資料は「資料」欄へ）');
+  photoBusy=true;
+  const item=cur,id=cur.Id,dir=photoDir(cur);
+  try{
+    if(photoFor!==id)await loadPhotos();   // 既存の並びを読んでから足す（上書き防止）
+    if(photoFor!==id)throw new Error('既存の写真を読み込めなかったため中止しました。再読込してからやり直してください');
+    const list=photos.slice();
+    const token=await getToken();const digest=await getDigest(token);
+    for(const f of [`${SITE_PATH}/${DOCLIB}/${ROOT_FOLDER}`,folderPathOf(item),dir,dir+'/'+THUMB_DIR])await ensureFolder(f,token,digest);
+    const d=new Date(),z=n=>String(n).padStart(2,'0');
+    const stamp=`${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`;
+    let n=0;
+    for(const f of imgs){
+      n++;setPhotoStatus(`アップロード中… ${n} / ${imgs.length}`);
+      const ext=(extOf(f.name)||'.jpg').toLowerCase();
+      const name=`${stamp}_${String(n).padStart(2,'0')}${ext}`;
+      await spPutBlob(f,dir,name,token,digest);
+      const th=await makeThumb(f);
+      if(th){await spPutBlob(th,dir+'/'+THUMB_DIR,thumbName(name),token,digest);thumbCache[dir+'/'+name]=URL.createObjectURL(th);}
+      list.push({name,cat:'未分類'});
+      if(cur&&cur.Id===id){photos=list.slice();photoFor=id;renderPhotos();}
+    }
+    await writeManifest(dir,list);
+    // 物件フォルダのリンクが未登録なら入れておく（削除時にフォルダごと片付けるため）
+    if(!urlOf(item[F.folder])){
+      await spUpdate(id,{[F.folder]:{__metadata:{type:'SP.FieldUrlValue'},Description:'物件フォルダ',Url:'https://shoeih.sharepoint.com'+folderPathOf(item)}});
+      item[F.folder]={Url:'https://shoeih.sharepoint.com'+folderPathOf(item)};
+    }
+    if(cur&&cur.Id===id)setPhotoStatus(`${imgs.length}枚追加しました。種類を選んで、並びを整えてください`);
+  }catch(e){toast(e.message);setPhotoStatus('');}
+  finally{photoBusy=false;}
 }
 
 /* ================= 共通 ================= */
