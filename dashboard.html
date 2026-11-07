@@ -1407,7 +1407,9 @@ function resolveStaff(sei){
 // ===== 営業歩合による売上按分 =====
 // eigyo: parseDenpyoのcommissionのうち role==='営業' の行。seiStaff: AQ3（担当）を解決した名前。
 // 戻り値: [{name, share, main}]（shareの合計=1）。配列に .bad（警告文）を持たせることがある。
-function buildSplit(eigyo,seiStaff){
+// stockRatio: 部署ストック(AZ39)÷売上計上対象(AP33)。営業の割合はAP33に対する割合で書かれ、
+// 残りをストックにして合計100%にする書き方があるため、「営業割合の合計＋ストック比率＝100%」で検算する。
+function buildSplit(eigyo,seiStaff,stockRatio){
   const m=new Map();
   (eigyo||[]).forEach(c=>{
     const name=resolveStaff(c.name);
@@ -1422,7 +1424,11 @@ function buildSplit(eigyo,seiStaff){
   let bad='';
   let out;
   if(rateSum>0){
-    if(Math.abs(rateSum-1)>0.005) bad=`営業の歩合割合の合計が${Math.round(rateSum*1000)/10}%です（100%で按分し直して集計しています）`;
+    const sr=Math.max(0,Number(stockRatio)||0);
+    const pct=x=>Math.round(x*1000)/10;
+    if(Math.abs(rateSum+sr-1)>0.005) bad=sr>0
+      ? `営業の歩合割合${pct(rateSum)}%＋部署ストック${pct(sr)}%＝${pct(rateSum+sr)}%で、100%になっていません（個人分を営業割合の比で按分して集計しています）`
+      : `営業の歩合割合の合計が${pct(rateSum)}%です（100%で按分し直して集計しています）`;
     out=rows.map(x=>({name:x.name,share:x.rate/rateSum}));
   }else if(amtSum>0){
     out=rows.map(x=>({name:x.name,share:x.amount/amtSum}));
@@ -1570,7 +1576,9 @@ function parseDenpyo(buf,fileName,updated,folder,fileUrl){
   // ・按分の対象は個人分（AP33−部署ストック）。ストックは個人・チームには付けない。
   // ・件数（契約1件）と「担当」は割合50%以上の人（主担当）に付ける。50:50の同率はAQ3の人を優先、AQ3が居なければ上の行。
   // ・D列が空の伝票は従来通りAQ3の1人に100%。
-  const split=buildSplit(commission.filter(c=>c.role==='営業'), resolveStaff(sei));
+  const uriageAP33=n('AP33');
+  const split=buildSplit(commission.filter(c=>c.role==='営業'), resolveStaff(sei),
+    uriageAP33>0?Math.min(stock,uriageAP33)/uriageAP33:0);
   const mainStaff=(split.find(s=>s.main)||split[0]).name;
   return {
     no:v('AW2'), fileName, updated, folder:folder||'', url:fileUrl||'',
