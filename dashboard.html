@@ -1404,6 +1404,49 @@ function resolveStaff(sei){
   return hit||String(sei).trim();
 }
 
+// ===== 営業歩合による売上按分 =====
+// eigyo: parseDenpyoのcommissionのうち role==='営業' の行。seiStaff: AQ3（担当）を解決した名前。
+// 戻り値: [{name, share, main}]（shareの合計=1）。配列に .bad（警告文）を持たせることがある。
+function buildSplit(eigyo,seiStaff){
+  const m=new Map();
+  (eigyo||[]).forEach(c=>{
+    const name=resolveStaff(c.name);
+    // 割合(H)を正とし、無ければ金額(L)で比率を出す
+    const o=m.get(name)||{name,rate:0,amount:0};
+    o.rate+=Number(c.rate)||0; o.amount+=Number(c.amount)||0; m.set(name,o);
+  });
+  let rows=[...m.values()];
+  if(!rows.length) return [{name:seiStaff,share:1,main:true}];
+  const rateSum=rows.reduce((a,x)=>a+x.rate,0);
+  const amtSum=rows.reduce((a,x)=>a+x.amount,0);
+  let bad='';
+  let out;
+  if(rateSum>0){
+    if(Math.abs(rateSum-1)>0.005) bad=`営業の歩合割合の合計が${Math.round(rateSum*1000)/10}%です（100%で按分し直して集計しています）`;
+    out=rows.map(x=>({name:x.name,share:x.rate/rateSum}));
+  }else if(amtSum>0){
+    out=rows.map(x=>({name:x.name,share:x.amount/amtSum}));
+  }else{
+    return [{name:seiStaff,share:1,main:true}];
+  }
+  out=out.filter(x=>x.share>0);
+  // 主担当：最大シェアの人。同率なら AQ3 の人 → 上の行 の順
+  const max=Math.max(...out.map(x=>x.share));
+  const tops=out.filter(x=>Math.abs(x.share-max)<1e-9);
+  const main=tops.find(x=>normName(x.name)===normName(seiStaff))||tops[0];
+  out.forEach(x=>x.main=(x===main));
+  if(bad) out.bad=bad;
+  return out;
+}
+// 金額を伝票の按分(split)で割る。端数は主担当に寄せて合計を元の金額と一致させる。
+function splitAmount(r,amount){
+  const sp=(r&&r.split&&r.split.length)?r.split:[{name:r?r.staff:'',share:1,main:true}];
+  let rest=amount;
+  const parts=sp.map(s=>{const a=s.main?0:Math.round(amount*s.share);rest-=a;return {name:s.name,share:s.share,main:s.main,amount:a};});
+  parts.find(p=>p.main).amount+=rest;
+  return parts;
+}
+
 // フォルダ内のxlsxを列挙（日本語パスのため decodedurl 版を使用）
 async function spListFiles(folderPath){
   const token=await getToken();
@@ -1523,10 +1566,19 @@ function parseDenpyo(buf,fileName,updated,folder,fileUrl){
   const kachoList=commission
     .filter(c=>c.role==='課長' && c.name)
     .map(c=>({name:resolveStaff(c.name), rate:c.rate, amount:c.amount}));
+  // 営業の歩合欄（D36〜38 / 割合H / 金額L）で個人の売上を按分する。
+  // ・按分の対象は個人分（AP33−部署ストック）。ストックは個人・チームには付けない。
+  // ・件数（契約1件）と「担当」は割合50%以上の人（主担当）に付ける。50:50の同率はAQ3の人を優先、AQ3が居なければ上の行。
+  // ・D列が空の伝票は従来通りAQ3の1人に100%。
+  const split=buildSplit(commission.filter(c=>c.role==='営業'), resolveStaff(sei));
+  const mainStaff=(split.find(s=>s.main)||split[0]).name;
   return {
     no:v('AW2'), fileName, updated, folder:folder||'', url:fileUrl||'',
     keiyakuDate:d('I3','契約日'), hikiwatashiDate:d('T3','引渡日'), kessaiDate:d('AE3','決済日'),
-    seiName:sei, staff:resolveStaff(sei),
+    seiName:sei, seiStaff:resolveStaff(sei), staff:mainStaff,
+    split,                                        // [{name, share(0〜1), main}] 営業歩合の按分
+    splitLabel:split.length>1?split.map(s=>`${s.name} ${Math.round(s.share*1000)/10}%`).join(' / '):'',
+    splitBad:split.bad||'',
     kacho:kachoList.map(k=>k.name).join(' / '),  // 表示用の課長名（複数時はスラッシュ区切り）
     kachoList,                                    // 集計用：課長ごとの割合・金額
     taiyo:[v('I4'),v('T4')].filter(Boolean).join(' / '),
@@ -1591,6 +1643,8 @@ async function loadDenpyo(){
       // 契約日・決済日等が日付形式で読めないと、CRM同期時にSharePoint側でエラーになる（未入力扱いで通す）
       if(r.dateBad&&r.dateBad.length)
         denpyoWarn.push(`№${r.no||'—'}：日付として読めない項目があります（${r.dateBad.join('／')}）→ Excel側で日付形式に修正してください（同期は未入力扱いで通しています）`);
+      if(r.splitBad)
+        denpyoWarn.push(`№${r.no||'—'}：${r.splitBad}`);
     });
 
     denpyoData=[...byNo.values()].sort((a,b)=>(b.keiyakuDate||'').localeCompare(a.keiyakuDate||''));
@@ -1983,40 +2037,50 @@ function renderUriage(){
   // ---- 担当者別：個人分＝ユニット金額−ストック ----
   const by=new Map();
   const seenStaff=new Set();
+  // 個人分を営業歩合で按分。件数・取引総額は主担当（50%以上）にだけ付ける。ストックは個人に付けない。
   units.forEach(u=>{
-    const k=u.row.staff;
-    if(!by.has(k)) by.set(k,{cnt:0,uri:0,sou:0,stock:0});
-    const o=by.get(k); o.uri+=(u.amount-u.stock); o.stock+=u.stock;
-    const dk=k+'|'+keyOf(u.row);
-    if(!seenStaff.has(dk)){seenStaff.add(dk);o.cnt++;o.sou+=(u.row.sougaku||0);}
+    splitAmount(u.row,u.amount-u.stock).forEach(pt=>{
+      const k=pt.name;
+      if(!by.has(k)) by.set(k,{cnt:0,uri:0,sou:0});
+      const o=by.get(k); o.uri+=pt.amount;
+      const dk=k+'|'+keyOf(u.row);
+      if(pt.main&&!seenStaff.has(dk)){seenStaff.add(dk);o.cnt++;o.sou+=(u.row.sougaku||0);}
+    });
   });
   const arr=[...by.entries()].sort((a,b)=>b[1].uri-a[1].uri);
   document.getElementById('uri-staff-tbody').innerHTML=(arr.length?arr.map(([k,o])=>`
     <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td>
-    <td>${yen(o.uri)}${o.stock?`<div style="font-size:10px;color:var(--text3);">＋ストック ${yen(o.stock)}</div>`:''}</td>
+    <td>${yen(o.uri)}</td>
     <td>${yen(o.sou)}</td></tr>`).join('')
     :'<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>')
     +(totStock?`<tr style="color:var(--text3);"><td class="left" style="font-size:11px;">（部署ストック計・個人成績外）</td><td></td><td style="font-size:11px;">${yen(totStock)}</td><td></td></tr>`:'');
   document.getElementById('uri-staff-tfoot').innerHTML=arr.length?
     `<tr><td class="left">合計</td><td>${uniqRows.length}</td><td>${yen(totUri)}</td><td>${yen(totSou)}</td></tr>`:'';
 
-  // ---- チーム別：全額（課員のストックも含む） ----
+  // ---- チーム別：個人分を按分した各人の所属チームに計上。部署ストックはチームに付けず別行 ----
+  const teamOf=name=>{
+    for(const k of Object.keys(staffTeamMap||{})){ if(normName(k)===normName(name)) return `${staffTeamMap[k]}チーム`; }
+    return 'チーム外';
+  };
   const byTeam=new Map();
   const seenTeam=new Set();
   units.forEach(u=>{
-    const team=staffTeamMap[u.row.staff] ? `${staffTeamMap[u.row.staff]}チーム` : 'チーム外';
-    if(!byTeam.has(team)) byTeam.set(team,{cnt:0,uri:0,sou:0});
-    const o=byTeam.get(team); o.uri+=u.amount;
-    const dk=team+'|'+keyOf(u.row);
-    if(!seenTeam.has(dk)){seenTeam.add(dk);o.cnt++;o.sou+=(u.row.sougaku||0);}
+    splitAmount(u.row,u.amount-u.stock).forEach(pt=>{
+      const team=teamOf(pt.name);
+      if(!byTeam.has(team)) byTeam.set(team,{cnt:0,uri:0,sou:0});
+      const o=byTeam.get(team); o.uri+=pt.amount;
+      const dk=team+'|'+keyOf(u.row);
+      if(pt.main&&!seenTeam.has(dk)){seenTeam.add(dk);o.cnt++;o.sou+=(u.row.sougaku||0);}
+    });
   });
   const teamArr=[...byTeam.entries()].sort((a,b)=>{
     if(a[0]==='チーム外') return 1;
     if(b[0]==='チーム外') return -1;
     return a[0].localeCompare(b[0],'ja');
   });
+  if(totStock) teamArr.push(['部署ストック（チーム外）',{cnt:'',uri:totStock,sou:''}]);
   document.getElementById('uri-team-tbody').innerHTML=teamArr.length?teamArr.map(([k,o])=>`
-    <tr><td class="left"><b>${k}</b></td><td>${o.cnt}</td><td>${yen(o.uri)}</td><td>${yen(o.sou)}</td></tr>`).join('')
+    <tr${o.cnt===''?' style="color:var(--text3);"':''}><td class="left">${o.cnt===''?`<span style="font-size:11px;">${k}</span>`:`<b>${k}</b>`}</td><td>${o.cnt}</td><td>${yen(o.uri)}</td><td>${o.sou===''?'':yen(o.sou)}</td></tr>`).join('')
     :'<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px;">該当なし</td></tr>';
   document.getElementById('uri-team-tfoot').innerHTML=teamArr.length?
     `<tr><td class="left">合計</td><td>${uniqRows.length}</td><td>${yen(totUri)}</td><td>${yen(totSou)}</td></tr>`:'';
@@ -2046,7 +2110,7 @@ function renderUriage(){
           <td class="left"><span class="pill">${r.no||'未記入'}</span></td>
           <td class="left">${(isNyukin?u.date:r.keiyakuDate)||'-'}</td>
           <td class="left">${isNyukin?`<span style="font-size:11px;">${u.tag}</span>`:(r.kessaiDate||'-')}</td>
-          <td class="left">${r.staff}${u.stock?'<div style="font-size:9px;color:var(--text3);">ストック</div>':''}</td>
+          <td class="left">${r.staff}${r.splitLabel?`<div style="font-size:9px;color:var(--text3);">${escH(r.splitLabel)}</div>`:''}${u.stock?'<div style="font-size:9px;color:var(--text3);">ストック</div>':''}</td>
           <td class="left" title="${(r.shozai||'').replace(/"/g,'')}">${r.jukyo||r.shozai||'-'}<br><span style="font-size:10px;color:var(--text3)">${r.bukkenType||''}</span></td>
           <td class="left">${r.urinushi||'-'}</td>
           <td class="left">${r.kainushi||'-'}</td>
@@ -2135,25 +2199,33 @@ function computeStats(basis,months){
     allNyukinLegs(denpyoData).filter(l=>inPeriod(l.date,months)).forEach(l=>{
       stockTotal+=l.stock;
       if(isExcludedStock(l.row.staff))stockBucho+=l.stock;
-      const o=ensure(disp(l.row.staff));
-      o.chukai+=l.own;
-      o.doneList.push({p:bukkenName(l.row),d:l.date,a:l.own,t:`${l.side}${l.seq}`});
+      // 個人分(own)を営業歩合で按分。件数・取引総額は主担当にだけ1回付ける。
       const key=l.row.no||l.row.fileName;
-      if(!seen.has(key)){seen.add(key);o.cnt++;o.sou+=(l.row.honntai||l.row.sougaku||0);}
+      splitAmount(l.row,l.own).forEach(pt=>{
+        const o=ensure(disp(pt.name));
+        o.chukai+=pt.amount;
+        o.doneList.push({p:bukkenName(l.row)+(pt.share<1?`（${Math.round(pt.share*1000)/10}%）`:''),d:l.date,a:pt.amount,t:`${l.side}${l.seq}`});
+        if(pt.main&&!seen.has(key)){seen.add(key);o.cnt++;o.sou+=(l.row.honntai||l.row.sougaku||0);}
+      });
     });
     // 未入金だが予定日が期間内にあるレグ＝入金予定（実績には足さず別枠で保持）
     // ストック分も同率で按分されているので、個人の予定とは別に部署ストックの入金見込みとして集計する。
     allNyukinPlanLegs(denpyoData).filter(l=>inPeriod(l.date,months)).forEach(l=>{
-      const o=ensure(disp(l.row.staff)); o.yotei+=l.own; o.yoteiCnt++;
-      o.yoteiList.push({p:bukkenName(l.row),d:l.date,a:l.own,t:`${l.side}${l.seq}`});
+      splitAmount(l.row,l.own).forEach(pt=>{
+        const o=ensure(disp(pt.name)); o.yotei+=pt.amount; o.yoteiCnt++;
+        o.yoteiList.push({p:bukkenName(l.row)+(pt.share<1?`（${Math.round(pt.share*1000)/10}%）`:''),d:l.date,a:pt.amount,t:`${l.side}${l.seq}`});
+      });
       stockYotei+=l.stock;
     });
   } else {
   rows.forEach(r=>{
     const st=stockOf(r); stockTotal+=st;
     if(isExcludedStock(r.staff))stockBucho+=st;
-    const o=ensure(disp(r.staff)); const own=r.uriage-st;
-    o.cnt++; o.chukai+=own; o.sou+=(r.honntai||r.sougaku||0);
+    const own=r.uriage-st;
+    splitAmount(r,own).forEach(pt=>{
+      const o=ensure(disp(pt.name)); o.chukai+=pt.amount;
+      if(pt.main){o.cnt++; o.sou+=(r.honntai||r.sougaku||0);}
+    });
   });
   }
   (shiireData||[]).forEach(it=>{
@@ -2211,19 +2283,25 @@ function computeTsuusan(basis,fy){
     allNyukinLegs(denpyoData).filter(l=>inPeriod(l.date,fyMonths)).forEach(l=>{
       stockTotal+=l.stock;
       if(TARGET_EXCLUDED_STAFF.has(l.row.staff))stockBucho+=l.stock;
-      const o=ensure(l.row.staff);
-      o.chukai+=l.own;
-      const mi=monthIdx(l.date); if(mi>=0)o.monthly[mi]+=l.own;
       const key=l.row.no||l.row.fileName;
-      if(!seen.has(key)){seen.add(key);o.cnt++;o.sou+=(l.row.honntai||l.row.sougaku||0);}
+      const mi=monthIdx(l.date);
+      splitAmount(l.row,l.own).forEach(pt=>{
+        const o=ensure(pt.name); o.chukai+=pt.amount;
+        if(mi>=0)o.monthly[mi]+=pt.amount;
+        if(pt.main&&!seen.has(key)){seen.add(key);o.cnt++;o.sou+=(l.row.honntai||l.row.sougaku||0);}
+      });
     });
   } else {
   rows.forEach(r=>{
     const st=stockOf(r); stockTotal+=st;
     if(TARGET_EXCLUDED_STAFF.has(r.staff))stockBucho+=st;
-    const o=ensure(r.staff); const own=r.uriage-st;
-    o.cnt++; o.chukai+=own; o.sou+=(r.honntai||r.sougaku||0);
-    const mi=monthIdx(dateOfChukai(r)); if(mi>=0)o.monthly[mi]+=own;
+    const own=r.uriage-st;
+    const mi=monthIdx(dateOfChukai(r));
+    splitAmount(r,own).forEach(pt=>{
+      const o=ensure(pt.name); o.chukai+=pt.amount;
+      if(pt.main){o.cnt++; o.sou+=(r.honntai||r.sougaku||0);}
+      if(mi>=0)o.monthly[mi]+=pt.amount;
+    });
   });
   }
   (shiireData||[]).forEach(it=>{
