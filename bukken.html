@@ -527,6 +527,23 @@ td .walk{margin-left:.6em;color:var(--text-muted);font-variant-numeric:tabular-n
   .mcards{display:block;}
 }
 
+
+/* --- 掲載用情報 --- */
+.lg-wrap{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px 16px;}
+.lg-h{grid-column:1/-1;font-size:13px;font-weight:600;color:var(--text);padding-top:10px;margin-top:4px;border-top:1px solid #f0f0f2;}
+.lg-h:first-child{border-top:none;padding-top:0;margin-top:0;}
+.lg-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.lg-chips label{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text);background:var(--fill);border-radius:980px;padding:5px 11px;cursor:pointer;user-select:none;}
+.lg-chips input{margin:0;width:auto;}
+.lg-chips label:has(input:checked){background:var(--accent-light);color:var(--accent);}
+.lg-cnt{font-size:11px;color:var(--text-muted);text-align:right;}
+.lg-cnt.over{color:var(--danger);}
+.lg-unit{display:flex;align-items:center;gap:6px;}
+.lg-unit span{font-size:12px;color:var(--text-sub);white-space:nowrap;}
+.lg-road{grid-column:1/-1;display:grid;grid-template-columns:70px repeat(4,minmax(0,1fr));gap:8px 10px;align-items:center;}
+.lg-road .rg-h{font-size:12px;color:var(--text-sub);font-weight:500;}
+.lg-road select,.lg-road input{width:100%;padding:8px 11px;border:none;border-radius:10px;font-size:13px;background:var(--fill);color:var(--text);outline:none;font-family:inherit;}
+@media(max-width:820px){.lg-wrap{grid-template-columns:1fr;}.lg-road{grid-template-columns:52px repeat(2,minmax(0,1fr));}}
 /* --- 写真 --- */
 .ph-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
 .ph{background:var(--surface);border-radius:14px;box-shadow:0 0 0 1px var(--hair);padding:6px;position:relative;cursor:grab;}
@@ -653,7 +670,7 @@ const F={title:'Title',pub:'PubStatus',sale:'SaleStatus',acq:'AcquiredDate',chk:
 let msalApp=null,currentUser=null,items=[],cur=null,view='active',listType=null;
 let currentRole='member'; // 担当者マスターの「役職」。CSV書き出しはadminのみ（CRMと同じ）
 let sortKey='Modified',sortDir=-1;
-let openSecs=new Set(['基本情報','交通・規模','写真']);
+let openSecs=new Set(['基本情報','交通・規模','写真','掲載用情報']);
 
 /* ================= 認証 ================= */
 function showLoginError(m){const e=document.getElementById('login-error');if(e){e.textContent=m;e.style.display='block';}else alert(m);}
@@ -997,7 +1014,7 @@ function showList(){document.getElementById('listview').style.display='flex';doc
 function showEditor(){document.getElementById('listview').style.display='none';document.getElementById('editor').style.display='flex';}
 function backToList(){cur=null;showList();renderList();}
 function select(id){cur=items.find(i=>i.Id===id);renderForm();showEditor();}
-function newItem(){cur={Id:null,[F.pub]:'未公開',[F.sale]:'販売中',[F.pref]:'東京都',[F.acq]:today(),[F.chk]:today()};renderForm();showEditor();}
+function newItem(){listingFor=null;cur={Id:null,[F.pub]:'未公開',[F.sale]:'販売中',[F.pref]:'東京都',[F.acq]:today(),[F.chk]:today()};renderForm();showEditor();}
 function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 
 /* ================= フォーム ================= */
@@ -1029,7 +1046,7 @@ function renderForm(){
         <input id="f_title" value="${esc(i[F.title]||'')}" placeholder="例：品川区戸越 条件付土地 13,980万"></div>
       <div class="fi"><label>公開区分</label><select id="f_pub">${opt(PUB,i[F.pub])}</select></div>
       <div class="fi"><label>販売状況</label><select id="f_sale" onchange="syncStatus()">${opt(SALE,i[F.sale])}</select></div>
-      <div class="fi"><label>種別 <span style="color:var(--accent);">＊CRMと同一</span></label><select id="f_type">${opt(KINDS,i[F.type])}</select></div>
+      <div class="fi"><label>種別 <span style="color:var(--accent);">＊CRMと同一</span></label><select id="f_type" onchange="renderListing()">${opt(KINDS,i[F.type])}</select></div>
       <div class="fi"><label>現在価格（万円）</label>
         <div style="display:flex;align-items:center;gap:6px;">
           <input id="f_price" type="number" value="${i[F.price]??''}" placeholder="13980" style="flex:1;">
@@ -1095,6 +1112,11 @@ function renderForm(){
     </div>
   </div>
 
+  <div class="sec${secCls('掲載用情報')}">
+    <div class="sec-head" onclick="tog(this,'掲載用情報')"><span>掲載用情報<span class="ph-cnt">自社HP・SUUMO・HOME'S・アットホーム共通</span></span> <span class="caret">${secCar('掲載用情報')}</span></div>
+    <div class="sec-body"><div class="lg-wrap" id="lg-wrap"></div></div>
+  </div>
+
   <div class="sec${secCls('売主・元付')}">
     <div class="sec-head" onclick="tog(this,'売主・元付')">売主・元付 <span class="caret">${secCar('売主・元付')}</span></div>
     <div class="sec-body">
@@ -1149,6 +1171,7 @@ function renderForm(){
     </div>
   </div>`;
   if(i.Id){initDropzone();initPhotoDropzone();if(openSecs.has('写真'))showPhotos();}
+  showListing();
 }
 function fileRow(label,url,copy,dispName,extra){
   if(!url)return `<div class="filelink"><span style="color:var(--text-muted);min-width:100px;">${label}</span><span style="color:var(--text-muted);">未登録</span></div>`;
@@ -1220,9 +1243,15 @@ async function save(){
   }
   try{
     const b=collect();
-    if(cur.Id){await spUpdate(cur.Id,b);toast('保存しました');}
-    else{const d=await spAdd(b);cur={...cur,...b,Id:d.Id};openSecs.add('資料');toast('登録しました。「資料」から添付できます');}
+    const lg=collectListing();
+    const wasNew=!cur.Id;
+    if(cur.Id){await spUpdate(cur.Id,b);}
+    else{const d=await spAdd(b);cur={...cur,...b,Id:d.Id};openSecs.add('資料');}
     const id=cur.Id;
+    let lgErr='';
+    if(lg){try{await saveListing(cur,lg,b[F.type]);}catch(e){lgErr=e.message;}}
+    if(lgErr)toast('物件は保存しましたが、掲載用情報の保存に失敗しました：'+lgErr);
+    else toast(wasNew?'登録しました。写真や資料を追加できます':'保存しました');
     await loadItems();
     cur=items.find(x=>x.Id===id)||cur;
     renderForm();
@@ -1307,6 +1336,179 @@ async function handleFiles(files){
     await loadItems();
     cur=items.find(x=>x.Id===id);renderForm();
   }catch(e){toast(e.message);if(dz)dz.textContent='ここにファイルをドラッグ＆ドロップ（クリックで選択）';}
+}
+
+/* ================= 掲載用情報 =================
+   自社HP・SUUMO・HOME'S・アットホームで共通に使う物件の詳細。
+   SUUMO入稿画面（土地／戸建／マンション）の項目と選択肢をベースにした「全媒体の上位集合」。
+   リストの列は増やさず、物件フォルダの _listing.json に保存する。 */
+const LISTING_FILE='_listing.json';
+const ZONES=['１種低層','２種低層','１種中高','２種中高','１種住居','２種住居','準住居','田園住居','近隣商業','商業','準工業','工業','工業専用','無指定','市街化調整区域','都市計画区域外'];
+const DIRS=['東','西','南','北','北東','南東','北西','南西'];
+const LEGAL=['防火地域','準防火地域','高度地区','高度利用地区','風致地区','景観法','景観地区','準景観地区','文化財保護法','古都保存法','密集市街地整備法','航空法','河川法','砂防法','農地法届出要','安全条例','宅地造成工事規制区域','急傾斜地崩壊危険区域','中高層階住居専用地区','高層住居誘導地区','観光地区','歴史風土保存地区','伝統的建造物群保存地区','特定街区','特別用途制限地域','文教地区','都市再生特別地区','特別緑地保全地区','高さ最高限度有','高さ最低限度有','建ぺい率最低限度有','容積率最低限度有','敷地面積最高限度有','敷地面積最低限度有','建物面積最高限度有','建物面積最低限度有'];
+const RESTR=['一部都市計画道路','一部協定通路','日影制限有','隅切り有','接道と段差有','敷地内段差有','壁面後退有','建築協定有','崖上につき建築制限有','崖下につき建築制限有','不整形地'];
+const TORIHIKI=['売主','建物売主','土地売主','販売提携(代理)','販売提携(媒介)','販売提携(復代理)','仲介(一般媒介)','仲介(専任媒介)','仲介(専属専任)','先物','事業主・売主'];
+const FEAT_COMMON=['角地','整形地','南側道路面す','前道６ｍ以上','閑静な住宅地','平坦地','高台に立地','前面棟無','緑豊かな住宅地','２沿線以上利用可','駅まで平坦','始発駅','陽当り良好','眺望良好','スーパー 徒歩10分以内','小学校 徒歩10分以内','総合病院 徒歩10分以内','周辺交通量少なめ','即引渡し可','都市ガス'];
+const FEAT_LAND=['地盤調査済','土地50坪以上','土地100坪以上','更地渡し','建築条件なし','建物プラン例有り'];
+const FEAT_HOUSE=['南向き','東南向き','南西向き','通風良好','２階建','３階建以上','ＬＤＫ１５畳以上','ＬＤＫ１８畳以上','ＬＤＫ２０畳以上','全居室６畳以上','吹抜け','ロフト','２世帯住宅','長期優良住宅認定通知書','設計住宅性能評価書','建設住宅性能評価書（新築時）','低炭素住宅','フラット３５・S適合証明書','耐震基準適合証明書','瑕疵保険（国交省指定）保証付','地盤調査済','土地50坪以上'];
+const FEAT_MS=['南向き','東南向き','南西向き','角部屋','最上階','２面採光','３面採光','通風良好','ＬＤＫ１５畳以上','ＬＤＫ２０畳以上','ペット相談','オートロック','宅配ボックス','管理人常駐','耐震基準適合証明書','リフォーム済'];
+const L=(k,l,t,o,kinds,x)=>Object.assign({k,l,t,o,kinds},x||{});
+const LAND='land',HOUSE='house',MS='mansion';
+const LDEFS=[
+  {h:'権利・面積',kinds:[LAND,HOUSE,MS]},
+  L('rights','敷地権利','sel',['所有権のみ','借地権のみ','所有権・借地権混在'],[LAND,HOUSE,MS]),
+  L('landAreaType','土地面積の区分','sel',['登記','実測'],[LAND,HOUSE]),
+  L('slope','うち傾斜部分','text',null,[LAND,HOUSE],{ph:'約10㎡ ／ 15%',hint:'3割以上なら必須'}),
+  L('flag','うち路地状部分','text',null,[LAND,HOUSE],{ph:'約12㎡ ／ 20%',hint:'3割以上なら必須'}),
+  L('highVolt','うち高圧線下（㎡）','num',null,[LAND,HOUSE]),
+  L('privRoad','私道負担','sel',['無','有','共有'],[LAND,HOUSE]),
+  L('privRoadArea','私道負担面積','text',null,[LAND,HOUSE],{ph:'約15㎡（持分1/4）'}),
+  L('easement','地役権','sel',['無','地役権','通行地役権','引水地役権','眺望地役権','通路賃借権'],[LAND,HOUSE]),
+  L('chimoku','地目','sel',['宅地','田','畑','山林','雑種地','原野','その他'],[LAND]),
+  L('landStatus','土地状況','sel',['更地','古家有り','古家有り更地渡し','未造成'],[LAND]),
+  L('buildCond','建築条件','sel',['条件なし','建築条件付き'],[LAND]),
+  L('planPrice','参考プラン 建物価格（万円）','num',null,[LAND]),
+  L('planArea','参考プラン 建物面積（㎡）','num',null,[LAND]),
+  {h:'建物',kinds:[HOUSE,MS]},
+  L('msKind','マンション種別','sel',['マンション','タウンハウス'],[MS]),
+  L('msName','マンション名','text',null,[MS]),
+  L('roomNo','部屋番号（社内用）','text',null,[MS]),
+  L('floor','所在階','num',null,[MS]),
+  L('aspect','開口部の向き','sel',DIRS,[MS]),
+  L('senyuType','専有面積の区分','sel',['壁芯','登記'],[MS]),
+  L('bldgAreaType','建物面積の区分','sel',['登記','実測'],[HOUSE]),
+  L('bldgAreaNote','建物面積の内訳','text',null,[HOUSE],{ph:'うち車庫12.5㎡'}),
+  L('balcony','バルコニー等','text',null,[MS],{ph:'バルコニー8.2㎡／ルーフバルコニー無'}),
+  L('privUse','専用庭・テラス（面積・使用料）','text',null,[MS],{ph:'専用庭15㎡ 使用料500円/月'}),
+  L('floorsAbove','地上階数','num',null,[HOUSE,MS]),
+  L('floorsBelow','地下階数','num',null,[HOUSE,MS]),
+  L('totalUnits','総戸数','num',null,[HOUSE,MS]),
+  L('structure','構造','sel',['木造','RC','SRC','鉄骨','軽量鉄骨','PC','HPC','ALC','その他'],[HOUSE,MS]),
+  L('method','工法','sel',['軸組工法','２×４工法','２×６工法','プレハブ工法','パネル工法','ユニット工法','ＳＥ工法','ＳＷ工法','ＦＰ工法','ＧＬ工法','その他'],[HOUSE]),
+  L('completed','完成時期（築年月）','text',null,[HOUSE,MS],{ph:'2026年3月 ／ 契約後4ヶ月'}),
+  L('bldgStatus','建物状況','sel',['新築','未入居','中古'],[HOUSE,MS]),
+  L('parking','駐車場','sel',['車庫','地下車庫','カースペース','カーポート','無'],[HOUSE]),
+  L('builder','施工会社','text',null,[HOUSE,MS]),
+  L('permitNo','建築確認番号','text',null,[HOUSE],{hint:'新築は掲載に必須'}),
+  L('energy','省エネ性能','text',null,[HOUSE,MS],{ph:'断熱等級5／目安光熱費 年20万円'}),
+  L('reform','リフォーム','text',null,[HOUSE,MS],{ph:'2023年 内装・水回り済'}),
+  {h:'管理・費用',kinds:[MS]},
+  L('mgmtType','管理形態','sel',['委託(常駐)','委託(通勤)','委託(巡回)','委託(管理員なし)','一部委託(常駐)','一部委託(通勤)','一部委託(巡回)','自主管理(常駐)','自主管理(通勤)','自主管理(巡回)','自主管理(管理員なし)'],[MS]),
+  L('mgmtFee','管理費（円/月）','num',null,[MS]),
+  L('repairFee','修繕積立金（円/月）','num',null,[MS]),
+  L('msParking','駐車場','text',null,[MS],{ph:'空有 月額25,000円'}),
+  {h:'法令・制限',kinds:[LAND,HOUSE,MS]},
+  L('zone1','用途地域','sel',ZONES,[LAND,HOUSE,MS]),
+  L('zone2','用途地域（またがる場合）','sel',ZONES,[LAND,HOUSE,MS]),
+  L('bcr','建ぺい率（%）','num',null,[LAND,HOUSE]),
+  L('far','容積率（%）','num',null,[LAND,HOUSE],{hint:'道路幅員で下がる場合は実際の値'}),
+  L('setback','セットバック','sel',['不要','要','済'],[LAND,HOUSE]),
+  L('setbackNote','セットバック面積など','text',null,[LAND,HOUSE],{ph:'要 約3.2㎡'}),
+  L('legal','法令上の制限','multi',LEGAL,[LAND,HOUSE],{full:true}),
+  L('restr','その他制限事項','multi',RESTR,[LAND,HOUSE],{full:true}),
+  L('art43','接道の特例（43条2項）','sel',['建築時・再建築時、建築基準法43条2項第1号の認定要','建築時・再建築時、建築基準法43条2項第2号の許可要（一括許可（包括）同意基準に適合）','建築時・再建築時、建築基準法43条2項第2号の許可要（建築審査会の同意が必要）'],[LAND,HOUSE],{full:true}),
+  L('restrNote','制限事項の補足','area',null,[LAND,HOUSE,MS],{full:true,max:350}),
+  {h:'道路・インフラ',kinds:[LAND,HOUSE]},
+  L('roads','前面道路','road',null,[LAND,HOUSE]),
+  L('water','上水道','sel',['公営水道','私設水道','井戸'],[LAND,HOUSE]),
+  L('sewer','下水道','sel',['本下水','集中浄化槽','個別浄化槽'],[LAND,HOUSE]),
+  L('gas','ガス','sel',['都市ガス','集中ＬＰＧ','個別ＬＰＧ','オール電化'],[LAND,HOUSE]),
+  {h:'取引・引渡し',kinds:[LAND,HOUSE,MS]},
+  L('torihiki','取引態様','sel',TORIHIKI,[LAND,HOUSE,MS]),
+  L('handover','引渡し','sel',['即','相談','指定有','契約後'],[LAND,HOUSE,MS]),
+  L('handoverNote','引渡し時期の補足','text',null,[LAND,HOUSE,MS],{ph:'2027年3月下旬'}),
+  L('fees','その他費用（町会費など）','text',null,[LAND,HOUSE,MS],{full:true,ph:'町会費 300円/月'}),
+  {h:'訴求（コメント・特徴）',kinds:[LAND,HOUSE,MS]},
+  L('featL','特徴','multi',FEAT_COMMON.concat(FEAT_LAND),[LAND],{full:true}),
+  L('featH','特徴','multi',FEAT_COMMON.concat(FEAT_HOUSE.filter(x=>!FEAT_COMMON.includes(x))),[HOUSE],{full:true}),
+  L('featM','特徴','multi',['南向き','東南向き','南西向き','角部屋','最上階','２面採光','３面採光','通風良好','陽当り良好','眺望良好','２沿線以上利用可','始発駅','閑静な住宅地','スーパー 徒歩10分以内','小学校 徒歩10分以内','ＬＤＫ１５畳以上','ＬＤＫ２０畳以上','ペット相談','オートロック','宅配ボックス','管理人常駐','耐震基準適合証明書','リフォーム済','即引渡し可'],[MS],{full:true}),
+  L('catchMain','メインキャッチ','text',null,[LAND,HOUSE,MS],{full:true,max:37,hint:'37字まで（SUUMOの表示上限）'}),
+  L('catchSub','サブキャッチ','area',null,[LAND,HOUSE,MS],{full:true,max:300}),
+  L('staffComment','スタッフコメント','area',null,[LAND,HOUSE,MS],{full:true,max:100})
+];
+let listing={},listingFor=null,listingLoading=false;
+function kindOf(t){return ({'土地':LAND,'条件付土地':LAND,'新築':HOUSE,'中古':HOUSE,'区分MS':MS})[t]||'';}
+function listingPath(i){return folderPathOf(i)+'/'+LISTING_FILE;}
+function curKind(){const e=document.getElementById('f_type');return kindOf(e?e.value:(cur&&cur[F.type]));}
+
+async function showListing(){
+  const w=document.getElementById('lg-wrap');if(!w||!cur)return;
+  if(!cur.Id){if(listingFor!=='new'){listing={};listingFor='new';}renderListing(true);return;}
+  if(listingFor===cur.Id){renderListing(true);return;}
+  const id=cur.Id;listingLoading=true;
+  w.innerHTML='<div class="hint" style="grid-column:1/-1;">読み込み中…</div>';
+  try{
+    const b=await spGetBlob(listingPath(cur));
+    let d={};if(b){try{d=JSON.parse(await b.text())||{};}catch(e){d={};}}
+    if(!cur||cur.Id!==id)return;
+    listing=d.fields||{};listingFor=id;listingLoading=false;renderListing(true);
+  }catch(e){listingLoading=false;if(cur&&cur.Id===id)w.innerHTML=`<div class="warnbox">掲載用情報を読み込めませんでした（${esc(e.message)}）。再読込してください。</div>`;}
+}
+/* 種別を変えたときは、入力中の値を拾ってから描き直す */
+function renderListing(fresh){
+  const w=document.getElementById('lg-wrap');if(!w)return;
+  if(listingFor===null||listingLoading)return;
+  if(!fresh)readListingDom();
+  const k=curKind();
+  if(!k){w.innerHTML=`<div class="hint" style="grid-column:1/-1;">${val('f_type')==='収益'?'収益物件はSUUMOに掲載できないため、掲載用の項目は出していません。':'「基本情報」の種別を選ぶと、その種別の掲載項目が表示されます。'}</div>`;return;}
+  const defs=LDEFS.filter(d=>d.kinds.includes(k));
+  w.innerHTML=defs.map(d=>d.h?`<div class="lg-h">${d.h}</div>`:fieldHtml(d)).join('');
+  w.querySelectorAll('[data-max]').forEach(el=>{const f=()=>{const c=document.getElementById(el.id+'_c');if(c){c.textContent=el.value.length+' / '+el.dataset.max;c.classList.toggle('over',el.value.length>+el.dataset.max);}};el.addEventListener('input',f);f();});
+}
+function fieldHtml(d){
+  const v=listing[d.k],id='L_'+d.k,cls='fi'+(d.full?' full':'');
+  const hint=d.hint?`<div class="hint">${esc(d.hint)}</div>`:'';
+  const cnt=d.max?`<div class="lg-cnt" id="${id}_c"></div>`:'';
+  if(d.t==='sel')return `<div class="${cls}"><label for="${id}">${esc(d.l)}</label><select id="${id}">${opt(d.o,v||'')}</select>${hint}</div>`;
+  if(d.t==='num')return `<div class="${cls}"><label for="${id}">${esc(d.l)}</label><input id="${id}" type="number" step="any" value="${esc(v??'')}">${hint}</div>`;
+  if(d.t==='text')return `<div class="${cls}"><label for="${id}">${esc(d.l)}</label><input id="${id}" value="${esc(v??'')}" placeholder="${esc(d.ph||'')}"${d.max?` data-max="${d.max}"`:''}>${cnt}${hint}</div>`;
+  if(d.t==='area')return `<div class="${cls}"><label for="${id}">${esc(d.l)}</label><textarea id="${id}" placeholder="${esc(d.ph||'')}"${d.max?` data-max="${d.max}"`:''}>${esc(v??'')}</textarea>${cnt}${hint}</div>`;
+  if(d.t==='multi'){const sel=new Set(Array.isArray(v)?v:[]);
+    return `<div class="${cls}"><label>${esc(d.l)}</label><div class="lg-chips" id="${id}">${d.o.map(o=>`<label><input type="checkbox" value="${esc(o)}"${sel.has(o)?' checked':''}>${esc(o)}</label>`).join('')}</div>${hint}</div>`;}
+  if(d.t==='road'){const r=Array.isArray(v)?v:[];
+    return `<div class="lg-road"><div class="rg-h"></div><div class="rg-h">方位</div><div class="rg-h">幅員（m）</div><div class="rg-h">接道長さ（m）</div><div class="rg-h">種別</div>`+
+      [0,1,2].map(n=>{const x=r[n]||{};return `<div class="rg-h">道路${n+1}</div>
+        <select id="L_rd${n}_dir" aria-label="道路${n+1}の方位">${opt(DIRS,x.dir||'')}</select>
+        <input id="L_rd${n}_w" type="number" step="0.01" aria-label="道路${n+1}の幅員" value="${esc(x.w??'')}">
+        <input id="L_rd${n}_len" type="number" step="0.01" aria-label="道路${n+1}の接道長さ" value="${esc(x.len??'')}">
+        <select id="L_rd${n}_type" aria-label="道路${n+1}の種別">${opt(['公道','私道','位置指定道路','2項道路'],x.type||'')}</select>`;}).join('')+`</div>`;}
+  return '';
+}
+/* 画面に出ている項目だけを listing に書き戻す（出ていない種別の値は消さずに残す） */
+function readListingDom(){
+  if(!document.getElementById('lg-wrap'))return;
+  LDEFS.forEach(d=>{
+    if(!d.k)return;
+    const id='L_'+d.k;
+    if(d.t==='road'){if(!document.getElementById('L_rd0_dir'))return;
+      listing[d.k]=[0,1,2].map(n=>({dir:val(`L_rd${n}_dir`),w:num(`L_rd${n}_w`),len:num(`L_rd${n}_len`),type:val(`L_rd${n}_type`)})).filter(x=>x.dir||x.w!==null||x.len!==null||x.type);return;}
+    const el=document.getElementById(id);if(!el)return;
+    if(d.t==='multi')listing[d.k]=[...el.querySelectorAll('input:checked')].map(x=>x.value);
+    else if(d.t==='num')listing[d.k]=num(id);
+    else listing[d.k]=val(id);
+  });
+  Object.keys(listing).forEach(k=>{const v=listing[k];if(v===''||v===null||(Array.isArray(v)&&!v.length))delete listing[k];});
+}
+/* 保存用。読み込みに失敗している物件では null を返し、上書きしない */
+function collectListing(){
+  if(listingLoading)return null;
+  if(cur&&cur.Id&&listingFor!==cur.Id)return null;
+  if(cur&&!cur.Id&&listingFor!=='new')return null;
+  readListingDom();
+  return JSON.parse(JSON.stringify(listing));
+}
+async function saveListing(item,fields,type){
+  const token=await getToken();const digest=await getDigest(token);
+  for(const f of [`${SITE_PATH}/${DOCLIB}/${ROOT_FOLDER}`,folderPathOf(item)])await ensureFolder(f,token,digest);
+  const data={version:1,updated:new Date().toISOString(),kind:kindOf(type),fields};
+  await spPutBlob(new Blob([JSON.stringify(data,null,1)],{type:'application/json'}),folderPathOf(item),LISTING_FILE,token,digest);
+  listing=fields;listingFor=item.Id;
+  // 物件名を後で変えてもフォルダを見失わないよう、フォルダのリンクを固定しておく
+  if(!urlOf(item[F.folder])){
+    const u='https://shoeih.sharepoint.com'+folderPathOf(item);
+    await spUpdate(item.Id,{[F.folder]:{__metadata:{type:'SP.FieldUrlValue'},Description:'物件フォルダ',Url:u}});
+    item[F.folder]={Url:u};
+  }
 }
 
 /* ================= 写真 =================
