@@ -2195,6 +2195,8 @@ function computeStats(basis,months){
   if(targetData)Object.keys(targetData).forEach(n=>dispMap.set(normName(n),n));
   const disp=n=>dispMap.get(normName(n))||n;
   const per=new Map(); let stockTotal=0,stockBucho=0,stockYotei=0;
+  // 部署行のツールチップ用：入金レグ単位の明細（個人分own＋部署分s）。個人別のdoneListとは別に持つ。
+  const legList=[],legYoteiList=[];
   const ensure=k=>{if(!per.has(k))per.set(k,{cnt:0,chukai:0,shiireCnt:0,shiire:0,sou:0,yotei:0,yoteiCnt:0,doneList:[],yoteiList:[]});return per.get(k);};
   const isExcludedStock=name=>{
     // TARGET_EXCLUDED_STAFF もスペース差を吸収して判定
@@ -2207,6 +2209,7 @@ function computeStats(basis,months){
     allNyukinLegs(denpyoData).filter(l=>inPeriod(l.date,months)).forEach(l=>{
       stockTotal+=l.stock;
       if(isExcludedStock(l.row.staff))stockBucho+=l.stock;
+      legList.push({p:bukkenName(l.row),d:l.date,a:l.amount,own:l.own,s:l.stock,t:`${l.side}${l.seq}`});
       // 個人分(own)を営業歩合で按分。件数・取引総額は主担当にだけ1回付ける。
       const key=l.row.no||l.row.fileName;
       splitAmount(l.row,l.own).forEach(pt=>{
@@ -2224,6 +2227,7 @@ function computeStats(basis,months){
         o.yoteiList.push({p:bukkenName(l.row)+(pt.share<1?`（${Math.round(pt.share*1000)/10}%）`:''),d:l.date,a:pt.amount,t:`${l.side}${l.seq}`});
       });
       stockYotei+=l.stock;
+      legYoteiList.push({p:bukkenName(l.row),d:l.date,a:l.amount,own:l.own,s:l.stock,t:`${l.side}${l.seq}`});
     });
   } else {
   rows.forEach(r=>{
@@ -2252,7 +2256,7 @@ function computeStats(basis,months){
       }
     }
   });
-  return {per,stockTotal,stockBucho,stockYotei};
+  return {per,stockTotal,stockBucho,stockYotei,legList,legYoteiList};
 }
 // 部署合計＝全担当合計（ストック含む＝AP33合計＋仕入分）
 // 部署合計 内訳付き：{chukai, shiire, total} を返す。
@@ -2263,7 +2267,10 @@ function totalOfStats(stats){
     doneList.push(...(o.doneList||[]));yoteiList.push(...(o.yoteiList||[]));});
   chukai+=stats.stockTotal;
   yotei+=(stats.stockYotei||0); // 部署ストックの入金見込み分も部署合計の「入金予定」に含める
-  return {chukai,shiire,yotei,doneList,yoteiList,total:chukai+shiire};
+  // 部署行の明細は入金レグ単位（個人分＋部署分）で出す。個人分だけだと全額ストックの入金が「0万」に見えるため。
+  return {chukai,shiire,yotei,
+          doneList:stats.legList||doneList,yoteiList:stats.legYoteiList||yoteiList,
+          total:chukai+shiire};
 }
 // チーム合計 内訳付き：{chukai, shiire, total}。ストックは含めない（部長ストックはチーム外）
 function teamTotalOfStats(stats,teamName){
@@ -2418,7 +2425,7 @@ function achievementDashboard(fy,months){
     const listTxt=(arr,head)=>{
       if(!arr||!arr.length)return head;
       const sorted=arr.slice().sort((x,y)=>(x.d||'').localeCompare(y.d||''));
-      const top=sorted.slice(0,10).map(x=>`${x.d} ${x.p}（${x.t}） ${man(x.a)}`).join('\n');
+      const top=sorted.slice(0,10).map(x=>`${x.d} ${x.p}（${x.t}） `+(x.s>0?`個人分 ${man(x.own)}／部署分 ${man(x.s)}`:man(x.a))).join('\n');
       return head+'\n'+top+(sorted.length>10?`\n…ほか${sorted.length-10}件`:'');
     };
     const tipC=a.chukai?`title="${escAttr(listTxt(withYotei?a.doneList:null,'仲介 '+yen(a.chukai)))}"`:'';
