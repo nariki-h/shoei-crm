@@ -394,7 +394,7 @@ table.uri tfoot td{font-weight:700;background:var(--bg);border-top:2px solid var
          <option value="nyukin">入金日（手数料入金）</option>
        </select>
        <span style="font-size:11px;color:var(--text3);" id="uri-updated"></span>
-       <button class="refresh-btn" onclick="loadDenpyo()">🔄 伝票を再読込</button>
+       <button class="refresh-btn" onclick="loadDenpyo(true)" title="この端末に保存した前回分を使わず、全ファイルを読み直します">🔄 伝票を再読込</button>
        <button class="refresh-btn" onclick="syncDenpyoToList(true)">🔁 CRMへ再同期</button>
      </div>
 
@@ -1480,11 +1480,11 @@ async function scanFolder(folderPath,depth){
   depth=depth||0;
   if(depth>5) return [];   // 想定外の深さで無限に潜らないための保険
   const label=folderPath.split('/').pop();
-  const files=(await spListFiles(folderPath)).map(f=>({...f,folder:label}));
-  const subs=await spListFolders(folderPath);
-  for(const sub of subs){
-    files.push(...await scanFolder(sub.ServerRelativeUrl,depth+1));
-  }
+  // ファイル一覧とサブフォルダ一覧は同時に取り、サブフォルダの中も同時に探す（順番は従来どおり）
+  const [list,subs]=await Promise.all([spListFiles(folderPath),spListFolders(folderPath)]);
+  const files=list.map(f=>({...f,folder:label}));
+  const nested=await Promise.all(subs.map(sub=>scanFolder(sub.ServerRelativeUrl,depth+1)));
+  nested.forEach(x=>files.push(...x));
   return files;
 }
 
@@ -1496,11 +1496,24 @@ async function spDownloadFile(serverRelativeUrl){
   return await r.arrayBuffer();
 }
 
-// 契約伝票1ファイルをパース（固定セル座標）
-function parseDenpyo(buf,fileName,updated,folder,fileUrl){
-  const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:true});
+// 契約伝票1ファイルから「契約伝票」シートのセル値だけを取り出す（{セル番地: 値}）。
+// ・他のシートは読まない（sheets指定）。読み込み時間の短縮のため。
+// ・キャッシュにはこの「セル値」を保存し、解釈（parseDenpyo）は毎回やり直す。
+//   → 担当者マスターの変更やロジック修正（按分など）が、キャッシュがあっても必ず反映される。
+// ・シートが無いときは null。
+function extractDenpyoCells(buf){
+  const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:true,sheets:['契約伝票']});
   const ws=wb.Sheets['契約伝票'];
   if(!ws) return null;
+  const cells={};
+  for(const k in ws){ if(k[0]!=='!'&&ws[k]&&ws[k].v!==undefined) cells[k]=ws[k].v; }
+  return cells;
+}
+
+// 契約伝票1ファイルをパース（固定セル座標）。引数はextractDenpyoCells()の結果。
+function parseDenpyo(cells,fileName,updated,folder,fileUrl){
+  if(!cells) return null;
+  const ws={}; for(const k in cells) ws[k]={v:cells[k]};
   const v=a=>(ws[a]&&ws[a].v!==undefined&&ws[a].v!=='')?ws[a].v:null;
   const n=a=>{const x=v(a);return typeof x==='number'?x:(x?Number(String(x).replace(/,/g,''))||0:0);};
   // 日付セルがExcelの日付型でなく手入力の文字列だと（例：年の無い「5/28」や余分な文字混じり）、
@@ -1608,8 +1621,62 @@ function parseDenpyo(buf,fileName,updated,folder,fileUrl){
   };
 }
 
+// ===================================================================
+// 契約伝票の読み込み高速化（並列ダウンロード＋端末内キャッシュ）
+// -------------------------------------------------------------------
+// ・ダウンロードは同時に DENPYO_CONCURRENCY 本まで（多すぎるとSharePointの429制限にかかる）。
+// ・キャッシュはこの端末のブラウザ内（IndexedDB）。鍵はファイルのパス、
+//   ファイルの更新日時(TimeLastModified)が前回と1秒でも違えば読み直す。
+// ・保存するのは「契約伝票」シートのセル値だけ。解釈は毎回parseDenpyo()でやり直す。
+// ・セル値の取り出し方（extractDenpyoCells）を変えたら DENPYO_CACHE_VER を上げる → 古いキャッシュは自動で使われなくなる。
+// ・IndexedDBが使えない環境（プライベートブラウズ等）では、キャッシュ無しで従来どおり全部読む。
+// ===================================================================
+const DENPYO_CONCURRENCY=5;
+const DENPYO_CACHE_VER=1;
+const DENPYO_DB='shoei-dashboard', DENPYO_STORE='denpyoCells';
+
+async function runPool(items,limit,fn){
+  let next=0;
+  const worker=async()=>{ while(next<items.length){ const i=next++; await fn(items[i],i); } };
+  await Promise.all(Array.from({length:Math.min(limit,items.length)},worker));
+}
+function denpyoDb(){
+  return new Promise((ok,ng)=>{
+    try{
+      const req=indexedDB.open(DENPYO_DB,1);
+      req.onupgradeneeded=()=>{ req.result.createObjectStore(DENPYO_STORE,{keyPath:'url'}); };
+      req.onsuccess=()=>ok(req.result);
+      req.onerror=()=>ng(req.error);
+    }catch(e){ ng(e); }
+  });
+}
+async function denpyoCacheGetAll(){
+  try{
+    const db=await denpyoDb();
+    const all=await new Promise((ok,ng)=>{
+      const r=db.transaction(DENPYO_STORE,'readonly').objectStore(DENPYO_STORE).getAll();
+      r.onsuccess=()=>ok(r.result||[]); r.onerror=()=>ng(r.error);
+    });
+    db.close();
+    return new Map(all.map(x=>[x.url,x]));
+  }catch(e){ console.warn('伝票キャッシュを読めませんでした（全件読み込みで続行）:',e); return new Map(); }
+}
+async function denpyoCacheSave(fresh,liveUrls){
+  try{
+    const db=await denpyoDb();
+    await new Promise((ok,ng)=>{
+      const tx=db.transaction(DENPYO_STORE,'readwrite'); const st=tx.objectStore(DENPYO_STORE);
+      fresh.forEach(x=>st.put(x));
+      const k=st.getAllKeys();
+      k.onsuccess=()=>{ (k.result||[]).forEach(u=>{ if(!liveUrls.has(u)) st.delete(u); }); };
+      tx.oncomplete=()=>ok(); tx.onerror=()=>ng(tx.error);
+    });
+    db.close();
+  }catch(e){ console.warn('伝票キャッシュを保存できませんでした:',e); }
+}
+
 // フォルダ全件読み込み → №で重複排除
-async function loadDenpyo(){
+async function loadDenpyo(force){
   showLoading('契約伝票を読み込み中...');
   denpyoWarn=[];
   try{
@@ -1620,17 +1687,39 @@ async function loadDenpyo(){
       denpyoWarn.push('契約伝票フォルダに .xlsx が1件もありません（'+DENPYO_ROOT+' 配下すべて）');
       renderUriage(); hideLoading(); return;
     }
-    const recs=[];
-    for(let i=0;i<files.length;i++){
-      const f=files[i];
-      showLoading(`契約伝票を読み込み中... (${i+1}/${files.length})`);
+    // キャッシュ（この端末のブラウザ内）。force=true（再読込ボタン）のときは使わず全部読み直す。
+    const cache=force?new Map():await denpyoCacheGetAll();
+    const out=new Array(files.length);   // 結果は元のファイル順に置く（並列で終わる順がバラバラでも、重複排除の結果を今と同じにするため）
+    const fresh=[];                       // 今回ダウンロードしたもの → キャッシュへ保存
+    let done=0, fromCache=0;
+    const tick=()=>showLoading(`契約伝票を読み込み中... (${done}/${files.length})`);
+    tick();
+    await runPool(files,DENPYO_CONCURRENCY,async(f,i)=>{
       try{
-        const buf=await spDownloadFile(f.ServerRelativeUrl);
-        const rec=parseDenpyo(buf,f.Name,f.TimeLastModified,f.folder,f.ServerRelativeUrl);
+        const c=cache.get(f.ServerRelativeUrl);
+        let cells;
+        if(c&&c.ver===DENPYO_CACHE_VER&&c.mod===f.TimeLastModified){ cells=c.cells; fromCache++; }
+        else{
+          const buf=await spDownloadFile(f.ServerRelativeUrl);
+          cells=extractDenpyoCells(buf);
+          fresh.push({url:f.ServerRelativeUrl,ver:DENPYO_CACHE_VER,mod:f.TimeLastModified,cells:cells});
+        }
+        out[i]={f:f,cells:cells};
+      }catch(e){ out[i]={f:f,err:e.message}; }
+      done++; tick();
+    });
+    const recs=[];
+    out.forEach(o=>{
+      const f=o.f;
+      if(o.err){ denpyoWarn.push(`${f.folder}/${f.Name}：${o.err}`); return; }
+      try{
+        const rec=parseDenpyo(o.cells,f.Name,f.TimeLastModified,f.folder,f.ServerRelativeUrl);
         if(rec) recs.push(rec);
         else denpyoWarn.push(`${f.folder}/${f.Name}：「契約伝票」シートが見つかりません`);
       }catch(e){ denpyoWarn.push(`${f.folder}/${f.Name}：${e.message}`); }
-    }
+    });
+    // キャッシュ更新：今回読んだものを保存し、フォルダから消えたファイルの分は捨てる
+    await denpyoCacheSave(fresh,new Set(files.map(f=>f.ServerRelativeUrl)));
 
     // №(AW2)ごとに更新日時が最新の1件だけ採用
     const byNo=new Map(); let dup=0;
@@ -1659,6 +1748,7 @@ async function loadDenpyo(){
     const inbox=denpyoData.filter(r=>r.folder==='受信箱').length;
     document.getElementById('uri-updated').textContent=
       `${files.length}ファイル / ${denpyoData.length}契約`
+      +(force?'（全件読み直し）':`（新規・更新 ${files.length-fromCache}件／前回分 ${fromCache}件）`)
       +(inbox?`　受信箱に未整理 ${inbox}件`:'')
       +`　最終読込 ${new Date().toLocaleTimeString('ja-JP')}`;
     renderUriage();
